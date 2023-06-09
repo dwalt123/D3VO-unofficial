@@ -1,0 +1,11 @@
+machine_hall/MH_02_easy/mav0/ 1403636973701666560 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715352412143104 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715349512143104 cam0
+machine_hall/MH_01_easy/mav0/ 1403636684813555456 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715385412143104 cam0
+machine_hall/MH_01_easy/mav0/ 1403636590813555456 cam0
+machine_hall/MH_02_easy/mav0/ 1403637002451666432 cam0
+machine_hall/MH_02_easy/mav0/ 1403636879851666432 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715339362142976 cam0
+machine_hall/MH_02_easy/mav0/ 1403636926551666432 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715291162142976 cam0

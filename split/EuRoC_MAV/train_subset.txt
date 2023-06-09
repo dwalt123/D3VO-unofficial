@@ -1,0 +1,16 @@
+machine_hall/MH_01_easy/mav0/ 1403636706863555584 cam0
+machine_hall/MH_02_easy/mav0/ 1403636864951666432 cam0
+machine_hall/MH_02_easy/mav0/ 1403636909301666560 cam0
+vicon_room1/V1_02_medium/mav0/ 1403715589262142976 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715379362142976 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715316612143104 cam0
+machine_hall/MH_02_easy/mav0/ 1403636882951666432 cam0
+machine_hall/MH_04_difficult/mav0/ 1403638212345096960 cam0
+machine_hall/MH_01_easy/mav0/ 1403636711613555456 cam0
+machine_hall/MH_01_easy/mav0/ 1403636718413555456 cam0
+machine_hall/MH_04_difficult/mav0/ 1403638153545096960 cam0
+machine_hall/MH_04_difficult/mav0/ 1403638134295097088 cam0
+machine_hall/MH_04_difficult/mav0/ 1403638202245096960 cam0
+machine_hall/MH_02_easy/mav0/ 1403636960951666432 cam0
+machine_hall/MH_04_difficult/mav0/ 1403638134895097088 cam0
+vicon_room1/V1_01_easy/mav0/ 1403715409162142976 cam0

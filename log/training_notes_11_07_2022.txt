@@ -1,0 +1,799 @@
+10/10/22
+
+Changed SSIM from torchmetrics to SSIM from kornia. Changed l1 loss sum
+reduction to mean reduction to see if the learning of depth and pose 
+was more balanced (not heavily toward depth or pose).
+
+10/12/22
+
+When reintroducing the affine transformations with the kornia warping function,
+the affine transformations were applied to the image warping function instead of
+the target image. This gives a noticeable increase of initial loss 
+from 10k-15k -> 20k-25k, suggesting more room for improvement now. In the 
+other case, you were essentially learning to keep the affine transformation
+to get better results. Now the affine transformations are learned to correct
+the target image.
+
+Observations and Questions:
+The pose is slowly becoming larger than 0.03 (e.g., 0.04-0.06), but could the 
+ReLU be making it harder to regress larger values? Should you go back to LeakyReLU
+now that the affine transformations were put in the right place? Also, since EuRoC MAV
+has larger transitions and rotations, could that help with learning pose, and KITTI is just
+a good way to learn depth first? 
+
+Update: computer began to loudly shake, so the experiment was cut for a few days (10/12-10/17)
+
+10/17/2022:
+Resuming experiment after computer shaking incident. 
+Still a massive artefact at the right edge of the images for some reason
+
+10/18/22:
+The code in the past uses torch.mean to calculate the normalized residual. 
+This means the uncertainty map is casting to a batch of residuals. This is likely only
+normalizing the mean of the image. So you should apply the torch.mean to the uncertainty map
+and torch.log(torch.prod(uncertainty_map)). Otherwise you have to make SSIM and L1 Loss a pixel wise operator
+(which might actually be better based on the paper.) If you use 'none' for reduction you can do this!
+
+Update: Kornia's multiscale loss is too slow (3+ seconds per training step) so L1 loss and their SSIMLoss reduction were changed to none in the original
+	to see if there are any significant changes. Training loss started at 0.747
+
+Update: Trying without normalizing the residual functions, to see if depth performs better this way. Images continue to be blank when using mean reduction. 
+        Initial training loss: 230534
+
+10/19/22:
+The training loss is more so in the 150k range, and the depth maps look visually better than the previous trials.
+
+Important Consideration:
+The affine parameters are being learned well. a is closer to 1, and b is closer to 0. However, the pose is regressing small numbers (e.g., 0.02). 
+Perhaps, the posenet model is having trouble learning the (likely bigger) weights of the pose. The pose block is a single linear mapping to the output dimension.
+Since a sum or none reduction loss benefits from mostly reducing error in depth, and the affine parameters for KITTI are in the range [0,1]. It would make sense
+that the model has yet to learn the proper weights for pose (not obvious that pose has a large impact of the error.) So initially, the network is learning to 
+encode information that benefits the affine parameters mostly. The challenge is learning how to take that encoding, and map it to pose in one layer.
+Also consider, that the loss might begin to drop off once the dataset has changed since the depth has been learned, but the poses for EuRoC MAV will change more drastically.
+So the strategy is to learn depth sufficiently well with KITTI, and Pose sufficiently well with EuRoC MAV. 
+
+10/20/22:
+The model is now working for EuRoC MAV. May have to check the stereo baseline calculations, but it's saving images.
+It looks like the training loss for EuRoC MAV started as high as 220k-300k, and came down to as low as 30k-70k. Will have to see improvement over time!
+
+After the first epoch on EuRoC MAV, the avg training loss was 65k! Second was 43k. Training time takes ~30 min/epoch now. 
+Validation Loss: 37k for second epoch on EuRoC MAV, Validation time: ~3 min
+
+The ground truth appears to be 0 for most batches. Check stereo baseline calculations. An inverse or other calculation might be causing this.
+
+Accidentally overwrote the output for the 20th KITTI run (epoch labeled 19). For visualization this won't matter but this means the last folder will be 58 (-1 because 0 indexed, -1 b/c of overwrite mistake)
+
+The depth looks good for EuRoC MAV. There are significant improvements. However, the pose regression is still struggling. Perhaps you should focus on pose with KITTI
+to get a smoother baseline. And then focus on learning depth with EuRoC MAV? It seems like it does particularly well early on. If this is the case,
+go back to mean reduction for the residual loss, and hope the depth begins to change after the 20th epoch. 
+
+You could also let it run through the 60 epochs now, and then change to mean reduction to see if it'll start learning pose, now that you've learned depth well. 
+
+10/21/22 Update:
+Model finished running (it only took 3 Days!)
+The depth although it worked for some cases, it failed to look perceptually well for others. 
+This is possibly because the pose and depth were not jointly being learned well. So even though the network learned
+to predict depth well for the training set, it didn't generalize well, creating some visually erroneous images.
+
+Solution: Fix the network early on until you're confident both depth and pose are being adequately learned at the same time.
+
+Also check out MonoRec. The same lab that designed D3VO came out with a new paper called MonoRec that has 
+an open source implementation. It might give some insights on their software engineering practices that could help
+debug some issues: https://github.com/Brummi/MonoRec . It looks like they also used kornia for this project and 
+they have their own SSIM class. And a lot of these classes have forward functions! This could probably be the issue, 
+since you're not using a backprojecting class or ssim class, the warping function itself is not learning directly how to warp
+images. Since MonoRec also uses Pytorch, read the paper and see if they have the warping process directly implemented in their code!
+
+Also, D3VO says "The perpixel minimum loss is proposed in Monodepth2 " refering to the min() function in the residual calculation,
+so you have to do the min() for every residual element, not the whole thing! Also, it looks like SSIM is calculated for every pixel as well,
+not the whole image. This might make a difference because instead of having varying scores throughout the image, it's constant.
+
+These observations might explain why the model is regressing constant images.
+
+If you look at kornia's source code (https://github.com/kornia/kornia/blob/master/kornia/losses/ssim.py), the functions do in deed have 
+a forward function for each class, which should make them differentiable in pytorch. So if you use perpixel SSIM and L1 Loss, you're
+differentiating each pixel by their own unique value, rather than the SSIM and L1 Loss of the entire image! 
+
+Also looks like MonoRec and Monodepth use the same differentiable SSIM function! 
+
+*** Although the kornia.geometry.depth.warp_frame_depth warps an image using depth, it doesn't have a forward pass!
+    Therefore pytorch has to guess! It's not technically differentiable in this sense.***
+Solution: learn to use DepthWarper() class in kornia since it has a forward pass. Pay particular attention to
+	  how the pose and depth would be differentiated in the forward pass.
+
+Action Items:
+- Use mean reduction for SSIM and L1 loss and use DepthWarper so that you have a warping function with a forward pass!
+  Need to investigate PinholeCamera and how they compute the projection matrix
+1. Change residual to min(residuals) then normalize with uncertainty map
+- Explore MonoRec, Monodepth2, Kornia, to see how they use their forward functions and see how they calculate 
+residuals per pixel. This should help!
+- Write these details on paper to see the connections
+
+Sidenote: kornia also has nerf code (see github) https://github.com/kornia/kornia/tree/master/kornia/nerf
+
+Update:
+- Wrapped kornia image warping function into own personal image warping function (no pinhole camera model needed)
+  so now the warping function should be differentiable wrt to the pose and depth
+- also changed the loss function to get the minimum of all elements in the residual to make the loss per pixel like the paper.
+
+Consider passing all loss functions into the loss forward and require gradients (and check them) to see if this will force gradients to depend on 
+pose, depth and/or using monodepth2 backprojection class since it has a forward pass. This makes it directly differentiable!
+
+Changing SSIM Loss, Backprojection and Projection mechanics so that there's a forward function explicitly for pytorch to make gradients
+
+Update: Added a class for every major function in TotalLoss. Hopefully this will make all of the underlying parameters differentiable, and improve the model.
+	Didn't add a class for SSIM, still using kornia. However, if there's room for improvement still you can use Monodepth2's
+
+Update: Changed the initial learning rate to 5e-4 instead of 1e-4. The pose immediately changed to in the 20 m range which is now too high. Work backwards
+	to force the scale to be in the meter range. And then hopefully the model will learn the appropriate depth that goes along with the pose. 
+
+Update: Changed it back to the original learning rate. Only major change is the location of the pose_optimizer.step() and depth_optimizer.step() methods.
+
+10/23/22 Update:
+Decided to chain the model.parameters() together with itertools.chain() like CycleGAN supposedly does to see if you can optimize the parameters better with
+one optimizer (potentially avoiding only pose or depth being learned?) 
+
+Update: Added scale exponent to smoothness and regularization term (just like lambda). Unsure if this is correct. Currently the loss is ~50M which is really big.
+	but the pose and affine parameters are learning much faster. Might need to somehow swap the exponents so that the smallest scale is ^4 and the full sized scale is ^1.
+
+10/24/22: The pose estimates are much larger than before and the depth is making slight improvements (for now). The loss went down a lot (50M -> <1k) in just 3 epochs
+	  For the next iteration change int(key) + 1 -> 4-int(key) so that the larget scale is raised to the power 1 and smaller scales to the power 4. This will emphasize
+	  making the smallest scale more like the encoding counterpart, and then that should propagate up in the scale.
+
+	  Also note the current z values are regressing negative values which is also problematic. 
+
+	  At this point in training the loss is <100. So the training in 3 epochs led to a decrease in magnitude of almost 6 (50M -> <100) and eventually got as low as <10 consistently.
+	  The goal should be to hit 0.1 per batch.
+
+Update: The loss was changed to give smaller scales more weight. The loss started at 1.55M and quickly went down to a magnitude closer to 10k.
+
+10/25/22:
+
+The resnet implementation in pytorch reassigned each layer to the input value. Maybe this helps the autodifferentiation of pytorch?
+Had to move around many layers in depth net to mimic this behavior. Reference paper if there's any weird behavior.
+
+Noticeable change: almost immediately the pose was > 0.001. And affine transformations quickly got to the expected values (e.g., 0.050 pose, 1 a, 0 b)
+
+10/26/22:
+After rereading a portion of the D3VO paper, the DepthNet might've been taken directly from monodepth2. This might resolve some concerns with the depth network.
+Use the code from the depthnet layers in monodepth2 and see if there are any changes.
+
+Also noticed the depth network does use the approach where the input is modified and passed until the output
+
+Side Note: Plot the weights of the model after it's done training (or do so for every epoch) so that you have
+	   a heat map of every layer to see how high or low each activation is being changed throughout training.
+	   There might be some interesting observations from looking at the training, like activations for the model at each layer over time.
+	   Could do this in 3D or just save a heat map at every layer. Also, you could show it at inference time to see how activations react
+	   in some scenarios vs others.
+
+Comparing Monodepth2 and D3VO's DepthNet Decoder, it's the same model, but they change the disp1-4 to disp_uncer1-4 by changing the output channels from 1 to 3.
+Also, Monodepth2 mentions that they change the scale of the images to be the same for the loss function. 
+Also, in the supplementary material it says they mask out exposure pixels because it impacts how the affine parameters are learned!
+Monodepth2 also has classes for decoding the pose. So you could make small classes for pose, a, b
+
+Action items:
+1. Get monodepth2 depthnet to work or adapted to your code (might be a glaringly obvious change needed that fixes things)
+2. Change posenet so that pose,a,b have their own classes (might just be updating encoder which would explain the behavior of the net: only a/b or pose are accurate!)
+
+Update:
+Didn't change action item too, because the pose_encoder was implemented with functions too, so if that assumption was
+true, the pose_encoder wouldn't be updated either. 
+
+Was able to implement the Monodepth2 depthnet. Will have to monitor the progress and see if the affine parameters still give bad results.
+If so, go back to the papers.
+
+Next Update: 
+- Pytorch says it makes the most sense to do requires_grad at the leaf nodes (input) and no where else. Make sure there are basic operations
+  from the output to the input and that they're differentiable.
+- Also explore how to mask regions of exposure. (LSD SLAM with stereo cams clamps the residual value)
+- Consider warping the image to the next image and visually how well it does. It might give insight on why things
+are behaving oddly.
+- use disparity instead of depth for smoothness function. 
+
+Update: Haven't attempted the exposure masking yet. Need to figure out what threshold to use. Updated the requires_grad_ to be for input
+        Using pseudo disparity for smoothness. The stereo depth might be better at first because the baseline transformation is consistent 
+	and likely a better option than the regressed pose. Consequently, the depth looks better since the pose is known. To resolve this,
+	the model will likely have to learn for them to look about the same. 
+
+Another detail: The cited paper in d3vo (left-right consistency) uses disparity and it uses the mean for the smoothness loss. D3VO uses sum.
+                This might be why the model allows itself to regress low a, and high b values. Loss_smooth >> Loss_ab
+		
+		The highest Loss_ab should be 8 per batch -> 16. And beta makes it contribute at most 0.16. Maybe it should be the mean so that the affine params are near this magnitude?
+		Mean is also used in Monodepth2 implementation!
+
+		Changing the smoothness loss to mean caused the loss to go down to 0.04. So the exponential terms for scale were removed. It started at ~ 0.2
+
+		Changing back to sum loss_smooth, because that will promote higher variance in the depth data, since the gradient is inverse depth
+		and this should force the model to learn varied depth. Loss started at 2 this time.
+
+10/27/22:
+Turned smooth loss and residual loss back to sum, changed inverse depth to regular depth. Hoping to learn depth like before, but with a differentiable pose network this time.
+Adding the scale exponents to see if this also adds an improvement. Because of these points, improved the depth and pose respectively.
+Loss is now 18,820,196,651,237,376 (18 quadrillion) at the start.
+
+Removed scaling exponential because the loss was not decreasing and no learning was occuring.
+
+
+
+Started at 161,737.890625
+
+* Maybe pose isn't being regressed properly because you're passing lists of transformation matrices, and those aren't directly differentiable without lie algebra
+  Make a differentiable transformation matrix function and pass the parameters directly. 
+
+It looks like Monodepth2 passes the outputs of the network with the transformation matrix in a dictionary.
+This probably forces the network to differentiate wrt the pose, rather than passing an already processed output to the loss
+
+
+11/1/22:
+
+Consider making a video of how each layer is changing in the networks
+
+Set Conv Layer, and Out layers to bias=True. The initial pose values, are now non zero
+
+True bias for all layers made the affine parameters slowly go to zero for a and higher for b. 
+
+Making the bias for the conv, and pose true, but false for a,b makes the pose snap quickly to a plausible answer
+(e.g, z = 1.5) but a -> 0, b -> 1
+
+Added a mask (see torch.where block in residual_loss) at 0.9 threshold. Changed bias for all back to False
+
+Added bias to pose out block, but it might still be effecting the affine parameters -> weird
+
+Update: changed the resizing so that the scales would resize and not the input images. Had to cut batch size to 4 
+	to fit in memory. Also running with a bias currently. This time it's not decreasing immediately.
+
+Update: Reintroduced scaling, no bias. Fixed the lambda coefficient. Right now it looks like the scaling forces
+	the smallest scale to be better which means there's less weight on how the following blocks are scaled.
+	Some early observations show that the affine parameters are at appropriate values, and the pose is nonzero but small still
+	(e.g., >0.01 instead of 0.001). Some z values are positive, some are negative. This might be a good starting point to start at.
+
+Also note that residual loss can get < 1 so when you use exponentials, that will go to 0. 
+So is the model learning to smooth as much as possible? (ie flat image) 
+
+It might be worthwhile to see the images at each scale, since the losses are weighted differently!
+Save them in different folders
+
+Changed lambda from 1e-3 -> 1e-4 because the loss for the residual was approx. 10x smaller than the reg loss,
+which likely explains why the loss was going down, but the images were flat, i.e., too much regularization.
+If this fixes the issue completely it's unclear why 1e-3 was reported in the paper. 
+
+Update: Looking at the Monodepth2 paper again, they use the mean normalized inverse depth to discourage shrinking of the depth.
+	They might've meant that they use it to discourage the shrinking of the gradient. So 1e-3 was reset and the inverse was taken
+	and the depth was mean normalized.
+
+11-2-22: 
+
+Update: Changed loss_self to sum reduction and added a bias to the posenet again. The depth was still not being learned
+	with the mean normalized depth. Now it looks like the pose is being learned and there's more weight associated with 
+	the residual loss.
+
+Update: Took out smoothing loss and affine parameters to see if it works at all in terms of learning to get pose
+	from warping. If it does you need to fix the affine and smoothness loss. If it still doesn't learn, something
+	more fundamentally wrong is going on! Also, taking out affine adjustments since they might not be learned
+
+Update: Using custom SSIM class instead of kornia since other papers besides Monodepth2 use the exact same implementation
+
+
+Update: Since the pose is still not changing that much, it might be the uncertainty map being too strong of a regularizer,
+	so that was capped to 80 like the depth maps. It looks like this improved the model quite well after one epoch.
+	No smoothness regularization or affine regularization.
+
+11-3-22:
+Adding the smoothness term made the images completely smooth again. It must be too strong still.
+Using 1e-5 for lambda to force residual error to be 10x greater to start.
+
+Update: The images still became smooth when reintroducing smoothness loss at 1e-5. Trying with mean normalized inverse depth again
+	and more regularization to see if it's any different. Proceed with just loss_self and loss_ab if it still doesn't work.
+	Investigate what might be going on.
+
+Update: Removed loss_smooth to avoid over smoothing the depth maps. It didn't work for inverse depth or regular depth. Even with lambda of 1e-5 it's still too much smoothing.
+	Changed lambda back to 1e-3. If images still smooth l_ab might have some unintended impact on smoothing, since without any reg. it performed well.
+	
+	If it works well, something is wrong with the smoothing in terms of scale, amount of regularization, etc.
+	
+Update: Try printing the pose and some of the warping results while training to debug why stereo and monocular depth aren't learning well.
+
+11-4-22:
+Noticed the artefacts might not go away because there's no smoothness constraint. 
+Changed smoothness loss to mirror that in Monodepth2. Try it without mean normalized inverse depth, and mean next if it doesn't work well.
+Also, look at why pose isn't being learned.
+
+Update: Added the smoothing back using sum reduction and depth. Noticed that for the early blocks it is smoothed more initially and
+	for the last block the down weighting is about the same as the residual loss. 
+
+Update: Changed the edge aware smoothness loss to reflect the approach in Monodepth2. 
+
+Update: Stereo depth is struggling to be learned, monocular depth is okay. The pose is not being learned well.
+	The poses seem reasonable and the tensors have grad_fn's so they should be differentiable. Added bias back into posenet.
+
+11-5-22:
+Update: It appears that in SfMLearner, their pose prediction output is done with convolutional layers (!!!)
+	Not a linear output for pose, a, b. This might be why there have been issues learning pose. If this doesn't work,
+	try multiplying output (like SfMLearner) by 0.01. The last dim was averaged to get the output in the right shape.
+
+Unclear why stereo depth is not being learned well. (Min res loss causing only monocular depth portion to be learned?)
+Additionally, it's not clear why pose isn't being learned well. It seems to be stuck.(Mult. by 0.01 and wait?)
+
+Update: Using Randomized ReLU (RReLU) instead of LeakyReLU or ReLU to see if the learning stops around 0.02 still
+	Early on it appears that it is learning higher values sooner. However, if this ultimately doesn't work you can try 
+	normalizing the data again to see how (if at all) it impacts the output. Large numbers eventually being learned (e.g., 10, 0.1-2 meters expected at 10 Hz)
+	You might need to multiply by 0.01 like sfmlearner so that the model learns to settle in the range of values. It might continuously grow otherwise.
+
+Update: The model was learning to wipe out the image. Multiplied by 0.01 like SfMLearner. 
+
+Update: The affine parameters began to give poor results very quickly. Went back to ReLU and no forced (0.01) scaling.
+	Normalizing the images now to see if that helps fix the problem. Trying to fix the vanishing gradient problem.
+
+11-6-22:
+
+Update: Looking at the stereo baseline more closely, it looks like the provided calibration data had a flipped convention so
+	you were actually projecting the image to the right of the right camera instead of back to the left stereo image.
+
+	This alone might be causing issues with learning the pose? Even though it has no gradient perhaps it's making it difficult.
+
+Update: Reintroduced RReLU with stereo baseline change to see if anything positive will happen.
+
+11-7-22:
+
+Update: Trying the 0.01 scaling approach since both SfMLearner and Monodepth2 use this approach. Normal ReLU.
+	Observation: With the scaling, a,b are learned pretty quickly.
+
+	Part of the challenge seems to be that depth is learned fairly quickly, but pose takes awhile to be learned. 
+
+Update: Switched up the order of torch.minimum to see if the stereo residual is always being left out compared to the other residuals.
+	Took away normalization on images.
+
+Update: Using F.interpolate instead of Resize within the forward function like the pytorch implementation of sfmlearner: https://github.com/ClementPinard/SfmLearner-Pytorch/blob/master/loss_functions.py
+
+Update: The depth might be the only major parameter being learned because it's directly sliced and passed to the warping functions. 
+	Passing the pose output directly to the warping functions to be processed internally.
+
+It looks like the stereo images are still unusually distorted. Calculate the stereo baseline by hand for each sequence and then hardcode it. See if there any differences.
+Originally when the stereo baseline was learned from projecting the image far to the right, the right side had artefacts. The baseline is projecting to the left now, but it's short
+which might explain the left side of the image having artefacts.
+
+Update:
+Changed the interpolate portion of the loss back to Resize. In the previous run there were significant artefacts over the image. The order of torch.minimum may 
+have played a significant role in getting the smooth loss functions prior. RReLU was added to see if long term it works better (want to see images after one epoch)
+
+Update: 
+Disabling a,b parameters since they're wiping out the image early. Probably will reintroduce for EuRoC MAV if possible. But hopefully, this forces the model
+to focus on learning depth and pose. 
+
+If the affine transformations don't work, but everything else does, that's still a good point to look at.
+And then you can modify the model to make it part of a semantic SLAM problem.
+
+Continue to monitor the magnitude of the pose output. If it stagnates at 10-100 range, then you might need to multiply by 1e-4 instead of 1e-2.
+However, if it continues to grow unbounded, then you'll have to rethink what's going on. 
+
+Update: It seems as though the model is staying within the 10-100 value range for the output. 
+	So it might be having trouble learning the scale of the outputs. Changed the scaling to 1e-4. 
+	Also it's worth noting, the affine parameters are going to 0 for a and 1 for b, so that behavior is
+	not because of the depth, it's because the parameters of the encoding block are leading to this result,
+	and the loss doesn't penalize it enough to prevent it from happening. Might need to change the 
+	Euler Angle -> Transformation Matrix back to the beginning.
+
+Update: RReLU still started to grow over 2 m with 1e-4 weight on the pose. Changed back to ReLU with 1e-2 weight.
+	Trying to see if the depth images will return to normal. If so, some other method for learning the pose might need to be looked at.
+	
+Update: Changing back to ReLU improved the depth, but the pose still had low values. Multiplied the pose output by 100
+	and it looks like it immediately started to react well. (Instead of staying stuck at 0.000/1 it varies significantly.)
+	This might just be for your particular implemenation. If both pose and depth work well, you can either reintroduce a and b
+	and work from there, or train the model until completion without a,b.
+
+Update: Took away scaling on pose. It was leading to artefacts on the depth image for some reason even though the pose was not changing in a significant way.
+
+Observation: The monodepth2 depth regressor (and d3vo paper) use sigmoids for output. That forces depth values from 0 to 1.
+	     So technically the outputs are giving depth from 0 to 1. Does that mean we need to rescale the depth afterward?
+	     And it appears that torch.clamp doesn't pull the depth to the range 0 to 80!
+
+Update: Verified that the values of the depth map are indeed somewhere from 0 to 1 after using torch.clamp.
+	In other words, it needs to be scaled! It has only be applying depth from 0 to 1 this whole time.
+	
+	Keep in mind, because this is a fundamental change, scaling or other methods from before might work now (potentially).
+	Even changing the smoothing loss approach. And hopefully stereo depth predictions will get better.
+
+Update: Changed l_smooth back to the d3vo suggestion. Might need to divide by 2 since mean was taken twice. 
+	Noticed only the loss for the last depth block is high. Might be because of scaling? Also, the affine param a is moving now.
+	
+	Should l_smooth regularize the depth directly regressed from the network ([0,1]) or the scaled depth ([1e-3,80])?
+
+11/11/22: Using D3VOs smoothing recommendation over regularized the image (constant images), so the monodepth2 version was used (inverse, mean normalized depth)
+	  The affine parameters were also performing poorly before it was stopped. 
+
+11/13/22: The scaling for the uncertainty map was taken away, because it might have been over regularizing the image.
+	  For example, if the uncertainty is 80, then the log(uncertainty) is close to 2, which almost as much as the residual.
+	  And this could have been influencing the loss to increase uncertainty in the image quickly (normalization portion of the loss). 
+	  
+
+	  Also, plotting inverse depth now so that hopefully the images look more like images in the literature. Might need to normalize too ...
+
+Update: After reading, the stereo image warping is meant to have Dts be the depth at the right image, and 
+	the target image is warped to the right image, but it says for simplicity that only the left image scenario was discussed.
+	Perhaps this is why the stereo image wasn't really being learned.
+
+Observation: As the pose values increase in magnitude, the affine parameter a->0 and b->1. But once this occurs,
+	     it can revert back. So, just because the model is currently learning a=0, it might not stay there.
+
+Observation: The a,b parameters blew up (e.g., a = 12) and the pose was approximately in the correct range.
+
+	     Looks like it's learning to get the right pose magnitude but somehow sigmoid isn't forcing a,b to be 0 to 1.
+
+Update: Since D3VO is using Monodepth2's architecture, you are actually learning disparity and hence why the model used sigmoid (0 to 1).
+	So for 1 to X meters, the model will work well. Less than 1 meter it will not work that well. This also might explain why the depth wasn't 
+	explicitly written as inverse depth for the smoothness loss too.
+
+	It seems as though the defaults use min_depth = 0.1 and max_depth = 100
+
+Observation: Writing the code directly based on what's written in the paper (and converting disparity to depth) immediately yields results that are converging more quickly to values in the 0.01-0.1 range.
+	     This usually takes awhile. And x,y,z are proportioned as they should be. Keep an eye on the exponential scaling to see if the model is being over regularized. 
+	     It's starting out in the thousand level range. In order to decrease <1 it will probably have to focus on the residual loss.
+
+	     If this doesn't yield expected results (e.g., constant images) then take away the exponential scaling.
+
+Update: Took away exponential scaling, because the loss became negative anyway, and the depth maps saturated.
+
+Observation: The depth maps look funny because the whole batch it trying to be saved at once. So the results are unpredictable.
+	     However, at epoch 3 the values of the pose are reasonable. The run was stopped right after the 5th epoch. Should see changes after that.
+	     The pose looks like it's in the correct range, and for the most part the affine parameters are working. The depth might start getting better later.
+             The roll, pitch, and yaw also look good. Since the camera has positive z facing forward, y is up and down and x is left to right. The only time
+	     when angles seem to change significantly is when pitch is approx. 30-50 degrees (0.6-0.9 radians), which is likely the occasional turn.
+
+	     Even if the depth is bad, the pose might be good so keep training until the end. It might gradually adjust.
+
+	     Note: before the EuRoC MAV runs you have to check the stereo baseline transformation, since you found that KITTI's was wrong. You want
+		   to calculate the transformation from left-to-right instead of right-to-left for stereo depth (util.stereo_baseline_euroc)
+
+Update: It appears that the depth will continue to stay constant, because of the scaling on the uncertainty map. Perhaps if you give a lower limit to the uncertainty
+	(e.g., 1e-3), the only way to move beyond that point is if the residual gets smaller.
+
+	Chose to make the lower_bound 0.1, so torch.log(0.1) = -2.3 and in theory, once the network reaches X-2.3, the network has to learn to optimize the residual. 
+	by down weighting the correct residuals and then it has to learn the correct depth/pose. It looks like X will start out at ~0.9. So you want
+	the loss to continue to get smaller after -1.4. And if it gets smaller than -2.3, somehow the normalized residual turned negative, i.e., expect 
+	significant improvements to the loss from [-1.4,-2.3]. 
+
+Observation: Plotting (r/x + log(x)) in wolfrom alpha will show that there's a natural minima at r=x when r>0, but when r=0, the minima is -inf. 
+	     This essentially is forcing the uncertainty map to learn the residual of the warped image and the target image (See D3VO Notes). 
+	     The loss will only diverge to -inf if the residual is 0 (perfect) and since the sigmoid restricts the uncertainty map to [0,1] it will
+	     overshoot the residual value if the residual value isn't the same as the uncertainty. 
+
+	     Also, it appears that residual values <= 0.3 are when the minima becomes negative valued. The desired behavior is that the residual and uncertainty force the 
+	     loss to -inf. 
+
+Update: Changed the EuRoC MAV stereo baseline to get measurement from left to right cameras to properly regress stereo disp.
+
+Update: The uncertainty map was clamped to a min of 1e-12 and No upperbound. At ln(1e-12) the loss will be quite large, but not NaN. Without clamping, the uncertainty map
+	may learn to guess 0, which will cause the NaNs. So now clamping is only for the purpose of preventing a NaN loss. If it persists, increase the lower bound,
+	since the gradients might also explode at 1e-12. 
+
+	Also, since you observed this peak, that means at some point, the minima was reached and the optimizer overshot the minima. So, if this happens again,
+	the model can only proceed by minimizing the residual value.
+
+Observation: In prior experiments, the uncertainty map had a lower bound of 1. Because of the sigmoid, this was forcing the uncertainty map to only be 1!
+	     And consequently, the minimum of the loss wasn't going to change based on the uncertainty map. The optimizer could only minimize the loss by minimizing the residual!
+	     This might mean that the optimizer has to learn the uncertainty map equals the residual and then it has to learn that the residual will be the only other thing
+	     that will minimize the loss.
+	     
+Observation: So far, for epoch 0 the depth images look good (for a first iteration). Keep in mind inverse depth is saved. So the skyline should be dark, and
+	     closer regions should be bright like images in the paper.
+
+Observation: From prior experiments, it seems as though the uncertainty map has to reach a minima first so that the optimizer must choose another means of reducing the loss.
+	     Then, it seems like the depth image has to converge to a minima. This might explain why large regularization (which leads to constant images that don't change)
+	     are leading to better pose estimates, sooner. Perhaps this is the optimization strategy : optimize uncertainty -> depth maps -> pose.
+	     Perhaps pose only improves once depth reaches a good local minima, and not necessarily in a joint manner (slow pose progress at first, faster later.)
+
+Observation: The loss started positive and quickly reached around -1. Toward the end of epoch 1 (2nd epoch) the loss is consistently below -2, which suggests depth is improving.
+	     
+Observation: Depth images appear to be way different after the first couple epochs. Monitor behavior. 
+
+11/16/22: 
+
+Observation: The loss tends to diverge over each iteration for some reason. Maybe it's printing the sum of the loss. 
+	     Makes sense why the average ends up being ~1000 lower than the last loss value! Fix the bug.
+
+11/17/22:
+
+Observation: The depth maps for KITTI are not that good, but the magnitude of the pose is greater than previous runs. Maybe once EuRoC MAV is introduced, 
+	     the depth will improve like the last complete run. And consequently, the pose might change because of that.
+
+Update: EuRoC MAV didn't make the depth map or pose any better, clamping uncertainty map to 1e-2 lowerbound to see if this will encourage better residual minimization
+	If this doesn't work try changing the smoothing loss to be as close to the d3vo implementation as possible. 
+
+11/18/22:
+
+Observation: For some reason the stereo depth goes flat after a couple of epochs. The monocular depth looks smoother, and like it will converge properly in the future,
+	     but no gurantees.
+
+Observation: The artefacts in the depth image might be due to the affine parameter masking. Try raising the threshold to 0.99.
+	     Also, change the masking so that it's one line. Might be saturating with a*img and not adding b when it should be.
+	     Change depth calculation to only be before the image warping.
+
+Update: Changed the threshold to 0.99, made mask calculation one line and only calculating depth before warping function now. If this doesn't fix artefact problem,
+	try changing mean() to sum() in L_smooth.
+
+Observation: It almost looks like depth is only being regressed where there is overlap in the images
+
+Update: Changed loss_smooth from mean() to sum() to see if smoothing will help.
+
+11/20/22:
+
+Update: Added code to loss file to save image residuals, warped images and current depth values for a batch. 
+	It looks like the stereo depth is not being learned because you could give a relatively good guess for monocular depth and get a relatively 
+	good image (somehow) whereas you need a good initial guess for stereo depth, otherwise it becomes worthless in the long run. 
+	You get streaks across the image, and the network doesn't know how to warp the image. Nor does it have incentive to do so since we're taking the 
+	minimum of the residuals. How is this problem addressed in the original papers if at all? It looks like the cited paper [27] (left-right consistency)
+	addresses the problem by projecting the depth map with the known pose, and using an L1 constraint on the stereo depth and projected stereo depth
+	to penalize depth maps looking radically different in the image. It looks like D3VO uses the images instead. Unclear if they ran into this issue
+	and fixed it another way.
+
+Update: The original monodepth paper actually used the 'by definition' depth-disparity calculation (depth = baseline*focal length/disparity).
+	So you're learning inverse disparity. Changed this and the stereo images started to warp well! Also changed ReLU to ELU because they mentioned for depth
+	some values would get stuck. This might also be the case for the pose since the values get stuck. If not, you can change it back later.
+	But for now you should expect monocular and stereo depth to be learned better now.
+
+Observation: After ~2k iterations the current implementation with ELU appears to be getting unstuck from that initial bad minima. Also could be because of the 
+	     change to the depth map calculation. Pose values are already in the 0.1 range for z with y and x slightly lower (as expected.)
+
+Update: Changed visualization of depth to be scaled by bf to see if the scaling is why the images are so dark. If not, you might need to change something.
+	Like going to ReLU. Not sure why the depth is impacted by pose network so heavily. 
+
+Update: Changed back to ReLU. ELU likely led to a better range of pose values, but in tandem with the depth network, it didn't provide good results.
+
+Observation: The pose is likely not changing, because the depth isn't sufficient enough to suggest the pose should change drastically. With that being said
+	     continue to think of ways to improve the depth.
+
+11/22/22:
+
+Update: Using sum() for L_smooth again to see if the combination of learning disparity and sum() are what the D3VO authors intended. 
+
+Observation: The uncertainty maps are still being learned to reflect high residuals. However, the mono depth map has weird artefacts and the stereo depth is constant.
+	     The warped images are capturing most of the details in the scene. Unsure if the depth map will converge to a reasonable solution. 
+	     Could try multiplying by 0.01 again to see if it 'facilitates learning' for the pose network as suggested in the monodepth2 code.
+
+	     For the saturation/over exposure mask, you want to mask out the areas where r,g,b are all 1. That will be white. If you do so for single channels,
+	     you'll mask out pur red, pure green, and pure blue. Which might impacting the image.
+
+	     TODO:
+	     1. Fix over exposure mask to check if all channel values are above that threshold, not single elements of the tensor.
+	     2. Save the masked images every 1000 epochs to see if there are any interesting observations / making sure it's working.
+	     3. Multiply pose output by 0.01 to see if that helps learn the pose.
+
+Observation: The artefact might be because of bad masking. However, for some images, the depth is improving for the monocular sense.
+
+Update: Realized the smoothness should only be applied to Dt, not Dts, which might explain why the stereo image is over smoothed still.  
+	Should only be smoothing the monocular depth image now.
+
+Observation: It appears that some depth images are performing decently well for the first epoch (distinctions between cars are being made.)
+	     Applying the masking properly is probably one thing that helped. Pose is still small but perhaps that's expected when multiplying by 0.01.
+
+Update:
+	1. Changing output to plot inverse disparity (more visible checkpoint images)
+	2. Checking to make sure the correcpt right stereo image is being used.
+
+Update: Just realized the left and right cameras have different intrinsics, so that could be effecting the accuracy as well. 
+	Changed util.get_intrinsic_matrix to output left and right stereo intrinsics for kitti and euroc mav
+
+11/24/22:
+
+Update: Changed back to monodepth2 approach for smoothness (divided by mean and used mean reduction) since a lot of the images were constant except for the 
+	test image.
+
+Update: It looks like the monocular depth prediction is working fairly well. After one epoch you can see cars on images that are relevant. However, the stereo depth
+	is still fairly constant. With that being said, try to run the model through to completion to see if pose gets better once depth converges. 
+
+	On your github you can say that the stereo depth wasn't learned throughout this process. And then do an ablation study with left-right consistency.
+	
+	You could also try changing the residual loss to take the minimum of each residual. Maybe that will force the model to learn stereo depth as well.
+
+11/25/22:
+
+Update: Reprojection loss in monodepth2 appears to concatenate the residuals along an axis and then torch.min is used to get the minimum along that axis.
+	Might make a difference since you won't need two variables to take the minimum. This might be slightly different for the computation graph.
+
+Update: Using F.interpolate again to see if there are any changes (since depth decoder uses it). Changed mode to bilinear.
+	Changing back to sum reduction for l_smooth
+	changing to torch.min from torch.minimum (unsure if this will work since this will just get the min channel).
+
+Update: This configuration didn't work. The smooth function is still saturating. Change back to mean reduction for the next run.
+
+Update: Changed back to mean reduction for the loss_smooth. Also changed batch size to 6 to reduce epoch time.
+	Observe how the new res_min approach behaves compared to the previous approach.
+
+	If this approach doesn't work, change back to original method for getting the min residual.
+	You could also try playing with sum reduction of both the residual loss and smoothness loss, or just residual loss.
+	Perhaps this will force the output to be accurate per pixel, and discourage constant depth maps.
+
+11/27/22:
+
+Observation: Loss with mean reduction is on the order of 0.01 vs. mean reduction
+
+Update: It looks like lambda is lowest at the output level which might explain the distortion.
+
+Observation: The disparity of two pixels should be larger than 512 at most. So 1/disparity is ~0.002 at the lowest. 
+	     So if you clamp the inverse disparity from 1e-3 to 1 that would be a reasonable range.
+
+Update: The current stereo depth is now changing along with the monocular depth instead of staying like static noise.
+	This is even though the smoothness isn't being directly compared.
+	
+	However, if this experiment doesn't work, Monodepth2 says it changes its sigmoid output to 1/(a*sigma_out + b) to adjust the range to 0 to 100
+	and they multiple the pose by 0.01. Remove the baseline*focal_length, mult. by 0.01 if it doesn't work. 
+
+Update: The intrinsics were kept because scaling like monodepth2 causes weird warping of the stereo image at the beginning.
+	With the intrinsics and 0.01 scaling, both the monocular and stereo depth look similar early on. It might take some time for pose to be learned.
+
+11/29/22:
+
+Update: Might need to train Monodepth2 from scratch and observe the outputs to see if this behavior is in general normal.
+	Also, in practice some methods do the residual loss on patches of images. Not sure if that will matter,
+	but it might help with addressing errors in some parts of the image.
+
+Note: Monodepth2 only uses 20 epochs to train depth, so you should expect the depth to resolve itself within the first 20 epochs.
+      EuRoC MAV might specifically for learning the pose given the nearly complete depth. Based on current progress, you can take away
+      0.01 scaling for the pose network so that the model predicts a larger range of pose values, and then hopefully once euroc mav is introduced
+      it will start to learn better values.
+
+Update: It looks like Monodepth2 takes the channel-wise mean of ssim and l1 loss for their residual loss and then those channels are concatenated.
+	So the minimum, mean residual loss is chosen instead of 1 of 9 channels from the residual losses.
+	They also clamp the computed depth to [1e-3,80]
+
+	Changes: 	1. Channel-wise mean for the residuals then minimum.
+			2. Clamp depth after baseline and focal length are applied to [1e-3,80]
+			3. Attempt to fix ground truth again.
+			4. 0.01 scaling appears to not be contributing much, so remove.
+			5. Started making code copies with 'single_res_channel_min' experiment in case you want to start from that experiment's code.
+
+Update: The ground truth for kitti is now working. Have to check euroc mav when the time comes. Might need to switch roll, pitch and yaw since the axes were switched though.
+
+	Still not sure from the literature how to resolve stereo depth not being learned.
+
+	Also, it appears that the StepLR scheduler was used in Monodepth2 even though the paper says it uses a learning rate of 1e-4 and eventually 1e-5.
+	(The step size is at 15, which is 5 epochs before the end of their training. You could replace your learning rate modification method by changing the step size to 55)
+
+Update: The focal length of the camera is around 950 for the original sized image. Meaning, this needs to be factored into the resizing of the image.
+
+Update: The torch.clamp(depth,1e-3,80) isn't working because the initial values are all above ~150.
+	Over time some of the levels are regressing values less than 80, but not necessarily the last one.
+	Divided by 2 because perhaps the scaling is the problem. The model essentially will have to learn to 
+	regress values on the order of 1/500 to get the proper depth.
+
+	Using the scaling of monodepth2, the values do indeed hit the 80m upper limit quickly.
+
+Update: It looks like Monodepth2 scales all the way up to the original resolution of the image (375,1242).
+	Also, their clamp is used for evaluation, not loss.
+
+12/1/22:
+
+Update: While updating the stereo baseline of euroc to the correct reference frame, it seems as though the calculations for getting a rotation matrix were wrong (Ryaw*Rpitch*Rroll instead of Rroll*Rpitch*Ryaw).
+	If you multiply these out while referencing the EuRoC MAV drone, you can tell that the rotation matrix calculation was wrong, so this could've impacted the image warping process and other processes while training.
+	Will have to restart but will see how things play out. 
+
+	For the stereo baseline of euroc mav, the sensor are wrt the body/imu frame and the ground truth data is wrt vicon/leica.
+
+Observations: The depth images, after addressing these issues are changing in both the monocular and stereo depth. The pose is similar in scale to the pose,
+	      so the loss is slightly smaller almost immediately. However, roll, pitch and yaw aren't changing much. The warped images are also reasonable.
+
+Maybe there's supposed to be less smoothing on the last scale, so that it can capture more details?
+
+12/2/22:
+
+Update: Going back to RReLU since the ground truth is fixed. Maybe it will converge to an appropriate result, and depth might later become better.
+	If the uncertainty maps are still blurry, change back to resize instead of interpolate.
+
+Observation: KITTI mostly varies in translation with largest values in z (forward), x(turning), but not y, roll, yaw. It has a slight increase in pitch for turns
+	     EuRoC MAV has very low x,y,z (sub cm level) but largely varying roll, pitch and yaw so they complement each other in terms of pose.
+
+Observation: Early on with RReLU, the stereo and monocular depth are similar and the pose is similar to the ground truth, however, the affine parameters are still shrinking.
+	     Maybe a penalty needs to be introduced to keep the affine parameters from shrinking (e.g., taking away beta.)
+
+Observation: It appears that after 5000 iterations on the first epoch, the affine brightness parameters are around 0.5, and the monocular and stereo depth can make out the edges of the skyline.
+	     And the pose is improving well. So if the parameters go to a=0 and b=1 and don't recover, you should enforce some constraint on a,b so that it doesn't do this. 
+	     Introducing RReLU, although improving the pose, and potentially the depth estimate, might have some unforseen consequences on a,b that the original authors didn't experience.
+	     Perhaps, since negative values can be regressed now, the values of the encoder are lower, and consequently the values can be brought to a suboptimal value.
+	     Also, you have to consider that intrinsics were not used for depth to project images, and the euler to transformation matrix calculation was wrong. This could've contributed to the model breaking too.
+
+	     Might need to mask out shadows too so that the model doesn't try to adjust the image down to 0. Because KITTI has a lot of high buildings, it might be causing the affine parameters to adjust to shadows.
+	     However, this might also level the playing field for monocular and stereo depth since the residuals will be similar for both images at first.
+
+Observation: When the affine parameters go to a=0 and b=1, the loss is not really changing, so it's possible that it can recover and that it's just inadequately performing at the moment.
+	     Perhaps multiplying by 0.01 will mitigate or slow down this blowing up effect.
+	    
+
+12/08/22:
+
+Started Using Weights and Biases to log data.
+
+Every 1000 iterations you see an update on the model's gradient distributions. Also should be able to track loss more closely.
+
+Figure out how to sync github commits and your code for versioning purposes. 
+
+Also added autocast to use mixed precision for the tensor cores. It does seem a tad faster. However, the loss is positive which is unsual at this stage.
+
+12/12/22:
+
+It looks like the gradient distribtution for RReLU gets concentrated toward zero toward the end of the epoch, so you might be able to multiply by 1e-3 to 1e-4 to get desirable results.
+
+12/13/22:
+
+The variables for pose aren't leaf nodes according to .is_leaf . Nor are a,b, d_images, etc. How is it updating variables at all?
+It looks like p_images and d_images are leaf nodes. 
+
+At the initial stages of the first epoch, the gradient wrt to these images for pose is positive and the gradient for depth
+is negative, but the magnitude for depth is larger.
+
+Registering hooks for the translation and rotation show that the values of the gradients for rotation and translation wrt to the loss
+are much bigger than the gradients for the images at the beginning of the network.
+
+The gradients for the network wrt to the pose and depth images, loss to translation/rotation are being plotted to weights and biases.
+Looking for if gradients will converge to 0 for some time. This might suggest a mechanism is preventing the parameters from being learned.
+
+Multiplied the translation gradient by 100 and the results seem to be closer in magnitude to the ground truth,
+and happened relatively quickly. Will monitor to see if the pose gradients will blow up. 
+
+The idea is that the model itself,
+is likely splitting the gradient across the parameters, so each parameter has a small contribution, and their individual weights
+might not be that large. Since the gradients are 100x larger, the updates are larger.
+
+If it explodes, consider multiplying by an exponentially decaying gradient multiplier e.g. 100*exp(-N), N is the number of iterations.
+
+12/15/22:
+
+It appears that global average pooling in D3VO is not referring to AvgPool2d with kernel size, stride = 1 which
+explains why the authors left that column blank. Global Average Pooling is actually a technique to replace linear layers
+in CNNs! https://paperswithcode.com/method/global-average-pooling#:~:text=Global%20Average%20Pooling%20is%20a,in%20the%20last%20mlpconv%20layer.
+
+No overfitting because there are no parameters optimize, unlike linear layers.
+
+Update: Global Average Pooling was applied to the features. The difference now is that the features are being
+	averaged. Prior to this, the average pooling was doing nothing, since the stride and kernel size were 1.
+	It was essentially just passing the value, since the average of a single sample is itself. So that means,
+	the pose, a, b network branches are directly learning from the features, and not being averaged. Small detail,
+	but now it's technically more correct.
+
+Observation: There are definitely significant changes. Mean reduction loss_smooth doesn't completely flatten the image depth early on.
+	     Both the pose and depth are struggling early on to change, so hopefully the correct combination of both will yield good results.
+
+12/18/22:
+
+Update: It looks like using list() instead of itertools is better for combining parameters for the optimizer.
+
+Update: Also, LSD SLAM Stereo (cited) uses an error threshold to compute the optimal a,b params. The authors must've used a similar
+	approach but instead of using it to calculate a,b they use it to threshold the image. So it's a residual based thresholding.
+	Not solely by intensity of a single image. 
+
+Update: Monitor the masked images and how the loss performs. The threshold, delta_max=0.25 can be adjusted to better mask the images.
+
+Observation: For some reason the depth maps in wandb look smooth throughout the images, but when saved to disk there's weird rings.
+	     It might be a combination of dpi and figure size, and not the model itself.
+
+Observation: The baseline*focal length should only be applied to the stereo depth. The monocular depth would need to use the estimated pose to get baseline information.
+	     So perhaps, you can use monodepth's approach to estimate disparity for monocular case, and baseline info for the stereo case. 
+	     In fact, if the baseline for stereo is being used for all depth predictions, then the model is learning to correct the monocular case and yielding
+	     (potentially) bad depth predictions for stereo. That's why both need to be processed like monodepth2 or just the monocular case. 
+
+Observation: Normalizing the data increased the SSIM from 0.25 to 0.45 on average. And it appears that the images in wandb are also not corrupted looking
+	     so it was the way the images were being saved in the past. L1 Loss is also sub 0.1 now. And pose appears to be increasing faster.
+
+Update: Successfully adding the config values to the wandb overview page for each run. This will make it easier to track major decision changes across code.
+	Next, you should add your code to github to track code changes too. That way you can eliminate a lot of your comments, and just unprivate the repo when you're done.
+
+Observation: The early observations for wordly-feather-3 are showing that the monocular and stereo depth are being learned. (not solely streaks in warped stereo image.)
+	     This is likely due to the normalization of the images, and the new thresholding from lsd slam stereo. And the pose is relatively the same.
+
+12/21/22:
+
+Observation: The pose continues to improve. It's difficult to tell from the images saved locally, but in wandb some depth images look good for some runs and poor for others.
+	     So it might be best to let the experiments run their course. Perhaps more clear results will emerge as the model continues to progress.
+
+Observation: After 5M iterations or ~15 epochs, the smoothness regularizer began to go up in loss, and the residual loss began to go down. This is likely because the depth regression
+	     is getting better (although not readily apparent) while the pose is improving. 
+
+12/22/22:
+
+Observation: The depth network (at least initially) is regressing depth well - even stereo is getting better. Uncertainty is still not that good. The pose network realizes that the changes in motion are small,
+	     but they're too big, and rotation is too small. If these adjustments can be made while maintaining the generalization of the previous dataset, then it might be a decent enough model to save permanently and put on github.
+
+1/3/23:
+Observation: The uncertainty map is meant to be for the monocular case only, so it doesn't make sense to do res_min on the left img -> right img.
+	     So more than likely Dts has to be trained in another fashion. Decided to add smoothing to Dts and add a residual loss so that it will learn in tandem with Dt.
+	     Hopefully this will lead to better results for Dt, Dts, uncertainty and pose. Even if it's not as good as the paper, you can then do an ablation 
+	     study with snake activations, regressing T directly, SGD / MSE at the end, etc. Also, can play around with pose graph optimization.
