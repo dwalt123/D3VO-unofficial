@@ -1,0 +1,8 @@
+backup/
+core/
+issues/
+log/
+models/
+__pycache_/
+runs/
+wandb/

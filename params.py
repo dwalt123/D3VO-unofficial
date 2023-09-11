@@ -12,6 +12,8 @@ class Params():
         self.device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
         
         # ------------------------- Dataset Parameters --------------------- #
+        self.scale_shapes = [(256, 512),(128, 256),(64, 128),(32, 64)]
+        
         # Resize
         self.torch_resize = Resize(size=(256,512)) # Recommended by UnDeepVO authors
         #self.torch_resize = Resize(size=(128,256))
@@ -53,8 +55,16 @@ class Params():
         # DataLoaders
         
         # ------------------------- KITTI Data ----------------------------- #
-        self.kitti_img_dir = r'F:/OSUGrad/Research/Code/Datasets/KITTI/Raw/'
-        self.kitti_img_dir_test = r'F:/OSUGrad/Research/Code/Datasets/KITTI/Visual_Odometry/data_odometry_color/dataset/sequences/'
+        #self.kitti_img_dir = r'F:/OSUGrad/Research/Code/Datasets/KITTI/Raw/'
+        #self.kitti_img_dir_test = r'F:/OSUGrad/Research/Code/Datasets/KITTI/Visual_Odometry/data_odometry_color/dataset/sequences/'
+        self.linux_root = '/media/dannyw/My Passport/'
+        self.windows_root = r'F:/'
+        self.os_name = 'linux'
+        
+        self.os_root = self.linux_root if self.os_name == 'linux' else self.windows_root
+        self.kitti_img_dir = self.os_root+'OSUGrad/Research/Code/Datasets/KITTI/Raw/'
+        self.kitti_img_dir_test = self.os_root+'OSUGrad/Research/Code/Datasets/KITTI/Visual_Odometry/data_odometry_color/dataset/sequences/'
+        
         self.kitti_img_dir_test_seqs = {'00': self.kitti_img_dir_test + '00/',
                                         '01': self.kitti_img_dir_test + '01/',
                                         '02': self.kitti_img_dir_test + '02/',
@@ -78,9 +88,9 @@ class Params():
                                         '20': self.kitti_img_dir_test + '20/',
                                         '21': self.kitti_img_dir_test + '21/'}
         
-        self.kitti_cam_cal = r'calib_cam_to_cam.txt'
-        self.kitti_left_cam = r'image_02'
-        self.kitti_right_cam = r'image_03'
+        self.kitti_cam_cal = 'calib_cam_to_cam.txt'
+        self.kitti_left_cam = 'image_02'
+        self.kitti_right_cam = 'image_03'
         
         # TODO: 
         # Consider plotting histograms of the data, calculating mean, variance 
@@ -88,16 +98,16 @@ class Params():
         
         # D3VO datasplit:
         # The 'Eigen' split is 61 sequences in the raw dataset for KITTI
-        self.kitti_train_split = r'split/KITTI/train_files.txt'
-        self.kitti_val_split = r'split/KITTI/val_files.txt'
-        self.kitti_test_split = r'split/KITTI/val_files.txt' # TODO: Generate your own test files .txt after training
+        #self.kitti_train_split = r'split/KITTI/train_files.txt'
+        #self.kitti_val_split = r'split/KITTI/val_files.txt'
+        #self.kitti_test_split = r'split/KITTI/val_files.txt' # TODO: Generate your own test files .txt after training
         # Subsets to test code
-        #self.kitti_train_split = r'split/KITTI/train_subset.txt'
-        #self.kitti_val_split = r'split/KITTI/val_subset.txt'
-        #self.kitti_test_split = r'split/KITTI/val_subset.txt' # TODO: Generate your own test files .txt after training
+        self.kitti_train_split = 'split/KITTI/train_subset.txt'
+        self.kitti_val_split = 'split/KITTI/val_subset.txt'
+        self.kitti_test_split = 'split/KITTI/val_subset.txt' # TODO: Generate your own test files .txt after training
         
         # ----------------------- EuRoC MAV Data --------------------------- #
-        self.euroc_mav_img_dir = r'F:/OSUGrad/Research/Code/Datasets/EuRoC_MAV/'
+        self.euroc_mav_img_dir = self.os_root+'OSUGrad/Research/Code/Datasets/EuRoC_MAV/'
         self.euroc_mav_sequences = ['machine_hall/MH_01_easy/mav0/',
                                     'machine_hall/MH_02_easy/mav0/',
                                     'machine_hall/MH_03_medium/mav0/',
@@ -110,10 +120,10 @@ class Params():
                                     'vicon_room2/V2_02_medium/mav0/',
                                     'vicon_room2/V2_03_difficult/mav0/']
         
-        self.euroc_left_cam = r'cam0'
-        self.euroc_right_cam = r'cam1'
+        self.euroc_left_cam = 'cam0'
+        self.euroc_right_cam = 'cam1'
         
-        self.euroc_mav_cam_cal = r'sensor.yaml'
+        self.euroc_mav_cam_cal = 'sensor.yaml'
         
         # TODO: 
         # Consider plotting histograms of the data, calculating mean, variance 
@@ -121,12 +131,14 @@ class Params():
         
         # D3VO datasplit:
         # The 'Eigen' split is 61 sequences in the raw dataset for KITTI
-        self.euroc_train_split = r'split/EuRoC_MAV/train_files.txt'
-        self.euroc_val_split = r'split/EuRoC_MAV/val_files.txt'
-        self.euroc_test_split = r'split/EuRoC_MAV/val_files.txt' # TODO: Generate your own test files .txt after training
+        self.euroc_train_split = 'split/EuRoC_MAV/train_files.txt'
+        self.euroc_val_split = 'split/EuRoC_MAV/val_files.txt'
+        self.euroc_test_split = 'split/EuRoC_MAV/val_files.txt' # TODO: Generate your own test files .txt after training
         
         # ------------------------------------------------------------------ #
         # There was no mention of normalization in the preprocessing, so it might not be needed. Investigate!
+        # It looks like the resnet encoder uses the same normalization as ImageNet implicitly in the encoder,
+        # so you should implicitly do it in your PoseNet forward method too.
         
         self.transform_kitti = torchvision.transforms.Compose([self.torch_resize, 
                                                                self.torch_totensor, 
@@ -135,7 +147,7 @@ class Params():
         self.transform_euroc = torchvision.transforms.Compose([self.torch_resize, 
                                                                self.torch_totensor, 
                                                                self.torch_normalize_euroc])
-        self.batch_size = 1 # 8 recommended by D3VO
+        self.batch_size = 4 # 8 recommended by D3VO
         
         # -------------------------- Loss Parameters ----------------------- #
         self.beta=1e-2
@@ -154,7 +166,23 @@ class Params():
         # ------------------------------------------------------------------ #
         
         # ------------------------- Datasets ------------------------------- #
-        self.normalize_data = False 
+        self.normalize_data = False # do it in forwards
+        
+        # ------------------------- DepthNet ------------------------------- #
+        
+        self.mono_flag = True
+        self.stereo_flag = False
+        self.uncer_flag = False
+        
+        if self.mono_flag and not self.stereo_flag and not self.uncer_flag:
+            self.depth_block_channels = 1
+        elif self.mono_flag and self.stereo_flag and not self.uncer_flag:
+            self.depth_block_channels = 2
+        elif self.mono_flag and self.stereo_flag and self.uncer_flag:
+            self.depth_block_channels = 3
+        else:
+            print("Please fix depth block output channel flags!")
+            self.depth_block_channels = 0
         
         # ------------------------- PoseNet -------------------------------- #
         
@@ -198,8 +226,8 @@ class Params():
         
         # More Training Settings
         self.use_stereo = False
-        self.use_uncer = True
-        self.use_ab = True
+        self.use_uncer = False
+        self.use_ab = False
         
         self.scale_intrinsic_mat = True
         

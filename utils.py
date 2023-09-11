@@ -4,6 +4,7 @@ import math
 import random
 import numpy as np
 import torch
+import torchlie as lie
 #from liegroups.torch import SO3,SE3
 from params import par
 import yaml
@@ -149,7 +150,7 @@ class Utilities():
           
           #R = SO3.exp(r.cpu())
           #T = SE3(R,t.cpu()).cuda(par.device)
-          
+          print(r.shape)
           roll_ang = r[:,0]
           pitch_ang = r[:,1]
           yaw_ang = r[:,2]
@@ -256,15 +257,21 @@ class Utilities():
         T1 = torch.tensor(c1T).view(4,4)
         T2 = torch.tensor(c2T).view(4,4)
         
-        [t1,r1] = self.transformation_matrix_to_euler_translation(T1[:3,:], None)
-        [t2,r2] = self.transformation_matrix_to_euler_translation(T2[:3,:], None)
-            
-        dt = t2-t1 # left-to-right
-        dr = r2-r1
-        
-        dr = dr.view(3)
+        #[t1,r1] = self.transformation_matrix_to_euler_translation(T1[:3,:], None)
+        #[t2,r2] = self.transformation_matrix_to_euler_translation(T2[:3,:], None)
+        T1_SE3 = lie.SE3(T1[:3,:])
+        T2_SE3 = lie.SE3(T2[:3,:])
+        baseline = T2_SE3.compose(T1_SE3.inv()).tensor # T1^-1 * T2
+        #[t1,r1] = self.transformation_matrix_to_euler_translation(T1[:3,:], None)
+        #[t2,r2] = self.transformation_matrix_to_euler_translation(T2[:3,:], None)
+           
+        #dt = t2-t1 # left-to-right
+        #dr = r2-r1
+        #dt = 
+        #dr = dr.view(3)
         #print(dt.shape)
         #print(dr.shape)
+        '''
         sin_roll = torch.sin(dr[0])
         cos_roll = torch.cos(dr[0])
         sin_pitch = torch.sin(dr[1])
@@ -281,16 +288,17 @@ class Utilities():
         Ryaw = torch.tensor([[cos_yaw, -1*sin_yaw, 0],
                              [sin_yaw, cos_yaw, 0],
                              [0, 0, 1]])
-        
+        '''
         #R = torch.matmul(torch.matmul(Ryaw,Rpitch),Rroll).view(3,3)
-        R = torch.matmul(torch.matmul(Rroll,Rpitch),Ryaw).view(3,3)
+        #R = torch.matmul(torch.matmul(Rroll,Rpitch),Ryaw).view(3,3)
         #baseline = torch.cat((R,dt.view(3,1)),1)
         # Body Frame to Camera Frame
         
-        
+        '''
         Rot = torch.tensor([[0.0, 1.0, 0.0],
                             [1.0, 0.0, 0.0],
                             [0.0, 0.0, 1.0]])
+        '''
         '''
         T_bc = SE3(SO3(Rot),torch.tensor(0,0,0))
         T1 = T_bc.dot(T1)
@@ -301,7 +309,7 @@ class Utilities():
         '''
         
         # Since the differences were calculated, only the translation vector needs to be rotated.
-        baseline = torch.cat((R,torch.matmul(Rot,dt.view(3,1))),1)
+        #baseline = torch.cat((R,torch.matmul(Rot,dt.view(3,1))),1)
         #baseline = torch.matmul(Rot,baseline)
         #return baseline
         
@@ -437,20 +445,20 @@ class Utilities():
             r1 = self.quaternion_to_euler(gt1_list[3:8])
             r2 = self.quaternion_to_euler(gt2_list[3:8])
             
-            R1 = SO3.exp(r1)
-            R2 = SO3.exp(r2)
+            #R1 = lie.SO3.exp(r1)
+            #R2 = lie.SO3.exp(r2)
             
             t1 = torch.tensor(gt1_list[:3])
             t2 = torch.tensor(gt2_list[:3])
             
-            T1 = SE3(R1,t1)
-            T2 = SE3(R2,t2)
+            T1 = lie.SE3.exp(torch.tensor([t1,r1]).reshape(1,6))
+            T2 = lie.SE3.exp(torch.tensor([t2,r2]).reshape(1,6))
             
             T_inv = T1.inv()
             #T = T_inv.dot(T2)
-            T = T2.dot(T_inv)
+            T = T2.compose(T_inv)
             
-            xi = SE3.log(T)
+            xi = lie.log(T)
             
             '''
             dt = torch.tensor(gt2_list[:3])-torch.tensor(gt1_list[:3])
@@ -489,7 +497,8 @@ class Utilities():
         R = torch.matmul(torch.matmul(Rroll,Rpitch),Ryaw).view(3,3)
         T_temp = torch.cat((R,torch.tensor(t).view(3,1)),1)
         '''
-        T_temp = SE3(SO3.exp(r),t)
+        euler = torch.cat((t,r),1).reshape(-1,6)
+        T_temp = lie.SE3.exp(euler)
         # Rotate Coordinate Frame from Vicon to Camera Frame (T from cam0 file)
         R_temp = torch.tensor([[0.0148655429818, -0.999880929698, 0.00414029679422],
                                [0.999557249008, 0.0149672133247, 0.025715529948],
@@ -498,10 +507,11 @@ class Utilities():
                             [-0.064676986768],
                             [0.00981073058949]]).reshape(3,1)
         
-        T_gt = SE3(SO3(R_temp), tgt)
+        euler_gt = torch.cat((tgt,lie.log(lie.SO3(R_temp))),1).reshape(-1,6)
+        T_gt = lie.SE3.exp(euler_gt)
         T_gt_inv = T_gt.inv()
         #T_new = T_gt_inv.dot(T_temp)
-        T_new = T_temp.dot(T_gt_inv)
+        T_new = T_temp.compose(T_gt_inv).tensor
         
         #T_new = torch.matmul(R_temp,T_temp) + tgt
         
@@ -527,18 +537,18 @@ class Utilities():
                            yaw2.reshape((1,)).unsqueeze(1)), 1).float()
         t_new = T2[:,3]
         '''
-        xi = SE3.log(T2)
+        xi = lie.log(lie.SE3(T2)).reshape(6)
         return xi[:3].tolist(), xi[3:].tolist()
     
     
-    def print_regression_progress(self, img_dir, pose_out, a, b, sample_id, dataset):
+    def print_regression_progress(self, img_dir, pose_out, scale, a, b, sample_id, dataset):
           # seq_dir: the date/sequence path 
           # dataset: 'kitti' or 'euroc'
           [seq_dir,img_num,_] = sample_id.split()
-          #
-          x = pose_out[:,0]
-          y = pose_out[:,1]
-          z = pose_out[:,2]
+          # should print with mean_inv_depth too!
+          x = pose_out[:,0]*scale
+          y = pose_out[:,1]*scale
+          z = pose_out[:,2]*scale
           roll = pose_out[:,3]
           pitch = pose_out[:,4]
           yaw = pose_out[:,5]
@@ -684,17 +694,15 @@ class Utilities():
           K3 = torch.cat((K03,zvec),1)
           
           # Adjusting based on smaller image scaling
+          '''
           if par.scale_intrinsic_mat:
-              scaling_x = 512.0/1241.0
-              scaling_y = 256.0/376.0
-              K2[0,0] = K2[0,0]*scaling_x
-              K2[0,2] = K2[0,2]*scaling_x
-              K2[1,1] = K2[1,1]*scaling_y
-              K2[1,2] = K2[1,2]*scaling_y
-              K3[0,0] = K3[0,0]*scaling_x
-              K3[0,2] = K3[0,2]*scaling_x
-              K3[1,1] = K3[1,1]*scaling_y
-              K3[1,2] = K3[1,2]*scaling_y
+              Ks = []
+              for idx in range(4):
+                  K2[0,:] = K2[0,:]/(2**idx)
+                  K2[1,:] = K2[1,:]/(2**idx)
+                  K3[0,:] = K3[0,:]/(2**idx)
+                  K3[1,:] = K3[1,:]/(2**idx)
+                  Ks.append([K2,K3])'''
           
           K = [K2,K3]
           cal_file.close()
@@ -716,23 +724,27 @@ class Utilities():
           K2 = torch.tensor([[fu2, 0, cu2],
                              [0, fv2, cv2],
                              [0, 0, 1]])
-          
+          '''
           if par.scale_intrinsic_mat:
-              scaling_x = 512.0/752.0
-              scaling_y = 256.0/480.0
-              K1[0,0] = K1[0,0]*scaling_x
-              K1[0,2] = K1[0,2]*scaling_x
-              K1[1,1] = K1[1,1]*scaling_y
-              K1[1,2] = K1[1,2]*scaling_y
-              K2[0,0] = K2[0,0]*scaling_x
-              K2[0,2] = K2[0,2]*scaling_x
-              K2[1,1] = K2[1,1]*scaling_y
-              K2[1,2] = K2[1,2]*scaling_y
+              Ks = []
+              for idx in range(4):
+                  K2[0,:] = K2[0,:]/(2**idx)
+                  K2[1,:] = K2[1,:]/(2**idx)
+                  K3[0,:] = K3[0,:]/(2**idx)
+                  K3[1,:] = K3[1,:]/(2**idx)
+                  Ks.append([K2,K3])'''
               
           K = [K1,K2]
       
       return K
     
+    def scale_intrinsics(self, K_mat, scale_int):
+        K_mat[0,:] = K_mat[0,:]/(2**(int(scale_int)+1))
+        K_mat[1,:] = K_mat[1,:]/(2**(int(scale_int)+1))
+        # assuming the original intrinsic matrix is given,
+        # and (512,256) max size is used so the largest scale should be
+        # divided by 2 (2^1), not 1 (2^0)
+        return K_mat.to(par.device)
     
     def remove_duplicate_files(self, root_dir, img_dir, img_list):
       # Per directory file duplicate removal

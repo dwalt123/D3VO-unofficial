@@ -63,6 +63,7 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         print("Batch # (Entire Dataset): " + str(c) + ", " + "Batch Number: " + str(idx))
         
         # Get Data for Training Iteration
+        '''
         if par.use_stereo:
             random_pick = torch.randint(0,2,(1,)).item()
             if random_pick == 0:
@@ -71,6 +72,8 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
                 cam_view = "right"
         else:
             cam_view = "left"
+        '''
+        cam_view = "left"
         
         p_images = training_data_pose.__getitem__(idx, shuffled_list, cam_view)
         d_images = training_data_depth.__getitem__(idx, shuffled_list, cam_view)
@@ -94,21 +97,24 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         beta = par.beta
         
         # Intrinsic camera matrix
-        intrinsic_mat = util.get_intrinsic_matrix(sample_idx, dataset_type)
+        intrinsic_mat = util.get_intrinsic_matrix(sample_idx, dataset_type) # 6/10/23 : Might need to normalize K (see monodepth github issues)
         
         # Training and Loss
         
         # Formerly in loss function
         pose_input = torch.cat((p_images["t-1"], p_images["t"]),1)
-        translation1, rotation1, a1, b1 = posenet_model(pose_input)
+        #translation1, rotation1, a1, b1 = posenet_model(pose_input)
+        translation1, rotation1 = posenet_model(pose_input)
         pose_6dof_t_minus_1_t = torch.cat((translation1,rotation1),1).to(par.device)
         
         reverse_tensor = torch.cat((p_images["t+1"], p_images["t"]),1)
-        translation2, rotation2, a2, b2 = posenet_model(reverse_tensor)
+        #translation2, rotation2, a2, b2 = posenet_model(reverse_tensor)
+        translation2, rotation2 = posenet_model(reverse_tensor)
         pose_6dof_t_t_plus_1 = torch.cat((translation2,rotation2),1).to(par.device)
         
         #depth_input = d_images[:,:3,:,:]
         # Always want to feed the left image in the stereo pair for either monocular or stereo case
+        '''
         if par.use_stereo:
             if d_images["cam"] == "left":
                 depth_input = d_images["t"]
@@ -116,6 +122,8 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
                 depth_input = d_images["ts"]
         else:
             depth_input = d_images["t"]
+        '''
+        depth_input = d_images["t"]
         
         depth_block_out = depthnet_model(depth_input)
         depth_block_s1 = depth_block_out[('disp', 0)]
@@ -129,6 +137,7 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
                   '2':depth_block_s2.requires_grad_(True),
                   '3':depth_block_s1.requires_grad_(True)}
         
+        '''
         if par.use_stereo:
             if d_images["cam"] == "left":
                 # Right Cam to Left Cam
@@ -143,13 +152,18 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         else:
             stereo_baseline = util.get_stereo_baseline_transformation(sample_idx, dataset_type)[:3,:]
             #print(stereo_baseline)
-        
+        '''
+        stereo_baseline = util.get_stereo_baseline_transformation(sample_idx, dataset_type)[:3,:].to(par.device)
+        '''
         if par.use_ab:
             a = [a1, a2]
             b = [b1, b2]
         else:
             a = []
             b = []
+        '''
+        a = []
+        b = []
         
         loss = loss_fn(p_images,
                        d_images,
@@ -177,7 +191,13 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         
         joint_optimizer.step()
         
-        util.print_regression_progress(img_dir,pose_6dof_t_minus_1_t, a1, b1, sample_idx, dataset_type)
+        a1 = 1.0
+        b1 = 0.0
+        inv_depth = 1.0/depth_block_s1
+        mean_inv_depth = inv_depth.mean(3,False).mean(2,False).reshape(par.batch_size)
+        #print(mean_inv_depth.shape)
+        util.print_regression_progress(img_dir,pose_6dof_t_minus_1_t, mean_inv_depth,
+                                       a1, b1, sample_idx, dataset_type)
         loss, current = loss.item(), batch 
         avg_train_loss += loss # Summing train loss to average later
         

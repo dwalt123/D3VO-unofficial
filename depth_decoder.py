@@ -6,6 +6,7 @@ import torch.nn as nn
 
 from collections import OrderedDict
 import torch.nn.functional as F
+from params import par
 #from layers import *
 
 class ConvBlock(nn.Module):
@@ -41,7 +42,7 @@ class Conv3x3(nn.Module):
         return out
     
 class DepthDecoder(nn.Module):
-    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=3, use_skips=True):
+    def __init__(self, num_ch_enc, scales=range(4), num_output_channels=par.depth_block_channels, use_skips=True):
         super(DepthDecoder, self).__init__()
 
         self.num_output_channels = num_output_channels

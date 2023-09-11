@@ -172,6 +172,7 @@ class PoseNet(nn.Module):
         #encoded_xp = self.pose_encoder(xp).view(par.batch_size,-1)
         
         #xp = self.pose_encoder(xp).view(par.batch_size,-1)
+        #xp = (xp - 0.45) / 0.225 # Mimicking ResNet encoder to achieve similar result
         xp = self.pose_encoder(xp)
         #print(xp.shape)
         #print(xp.size())
@@ -201,7 +202,8 @@ class PoseNet(nn.Module):
         #a = a_decoder(xp)
         #a = self.a_out(xp)
         
-        a = self.a_out(xp).view(par.batch_size,1)
+        #a = self.a_out(xp).view(par.batch_size,1) # ------------------------ Uncomment for a 
+        
         #print(a.shape)
         #a = torch.sum(self.a_out(xp),3).view(par.batch_size,1)
         
@@ -216,7 +218,8 @@ class PoseNet(nn.Module):
         #b = b_decoder(xp)
         #b = self.b_out(xp)
         
-        b = self.b_out(xp).view(par.batch_size,1)
+        #b = self.b_out(xp).view(par.batch_size,1) # ------------------------ Uncomment for b
+        
         #b = torch.sum(self.b_out(xp),3).view(par.batch_size,1)
         
         #print(b.shape)
@@ -228,19 +231,24 @@ class PoseNet(nn.Module):
         #xp = self.pose_out(xp)
         
         #pose = torch.mean(self.pose_out(xp),3).view(par.batch_size,6) # 1e-2
+        
+        '''
         if par.pose_scaling:
             scale = par.pose_scale
         else:
             scale = 1.0
+        '''
         
-        pose = scale*self.pose_out(xp).view(par.batch_size,6)
-        
+        #pose = scale*self.pose_out(xp).view(par.batch_size,6)
+        #pose = self.pose_out(xp).view(par.batch_size,6)
+        xp = self.pose_out(xp).view(par.batch_size,6)
         #print(xp)
         #print(xp.shape)
         # removed pose variable to make pose regression more explicit
-        rotation = pose[:,:3]
-        translation = pose[:,3:]
-        return translation, rotation, a, b
+        rotation = xp[:,:3]
+        translation = xp[:,3:]
+        #return translation, rotation, a, b
+        return translation, rotation
 
 posenet_model = PoseNet().to(par.device)
 

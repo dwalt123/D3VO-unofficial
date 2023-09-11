@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # For Checkpoint Saving
     SAVE_CHECKPOINT = 60*60*2 # time (in seconds) to save checkpoint (e.g., 10 hours = 36000 seconds)
     model_number = 0
-    date = '2_25_2023'
+    date = '8_20_2023' # Last Model: 6_10_23
     model_root_name = os.path.join('models','d3vo_model_')
     pose_model_checkpoint_path = model_root_name + date + '_v' + str(model_number) + '_pose.pth'
     depth_model_checkpoint_path = model_root_name + date + '_v' + str(model_number) + '_depth.pth'
@@ -81,7 +81,7 @@ if __name__ == "__main__":
     
         
     FROM_CHECKPOINT = False # If you should load a model checkpoint
-    FROM_SEED = True # If starting from a particular initialization/model seed for both depthnet and posenet
+    FROM_SEED = False # If starting from a particular initialization/model seed for both depthnet and posenet
     
     # Configuration
     wandb.init(project=experiment_name,
@@ -211,7 +211,7 @@ if __name__ == "__main__":
       print(str(some_loss) + ".\n")
       
     else:
-      print("Can't load from later checkpoint and seed ...")
+      print("Can't load from later checkpoint and/or seed ...")
     
     checkpoint_timer0 = t0 # Initializing Checkpoint timer
     checkpoint_timer1 = time.time() # Initial timer for checkpoint 2
@@ -285,11 +285,11 @@ if __name__ == "__main__":
         
         # Casting for Tensor Core Usage ...
         train_loss = train.train_loop(img_dir, train_split, training_data_pose,
-                                          training_data_depth, posenet_model, 
-                                          depthnet_model, loss_fn, joint_optimizer,
-                                          par.batch_size,
-                                          writer,
-                                          dataset_type)
+                                      training_data_depth, posenet_model, 
+                                      depthnet_model, loss_fn, joint_optimizer,
+                                      par.batch_size,
+                                      writer,
+                                      dataset_type)
             
        
         train_time1 = time.time()
@@ -352,18 +352,20 @@ if __name__ == "__main__":
             stereo_max = torch.max(1 / (1/100 + (1/1e-1 - 1/100) * db[0,0,:,:]))
             #sample_depth_map = torch.unsqueeze(1 / (1/100 + (1/1e-1 - 1/100) * db[0,0,:,:],0))*255.0/stereo_max
             sample_depth_map = (1 / (1/100 + (1/1e-1 - 1/100) * db[0,0,:,:]))*255.0/stereo_max
+            '''
             if par.use_stereo:
                 stereo_max = torch.max(1 / (1/100 + (1/1e-1 - 1/100) * db[0,1,:,:]))
                 sample_stereo_depth_map = torch.unsqueeze(1 / (1/100 + (1/1e-1 - 1/100) * db[0,1,:,:]),0)*255.0/stereo_max
             if par.use_uncer:
                 uncer_max = torch.max(db[0,2,:,:])
                 sample_uncer_map = torch.unsqueeze(db[0,2,:,:],0)*255.0/uncer_max
-            
+            '''
             # Add Images to Weights and Biases ...
             wandb_mono_depth_map = wandb.Image(sample_depth_map, caption="Monocular Depth Map")
             wandb.log({"mono_depth": wandb_mono_depth_map})
             del wandb_mono_depth_map
             
+            '''
             if par.use_stereo:
                 wandb_stereo_depth_map = wandb.Image(sample_stereo_depth_map, caption="Stereo Depth Map")
                 wandb.log({"stereo_depth": wandb_stereo_depth_map})
@@ -373,6 +375,7 @@ if __name__ == "__main__":
                 wandb_uncer_map = wandb.Image(sample_uncer_map, caption="Uncertainty Map")
                 wandb.log({"uncertainty": wandb_uncer_map})
                 del wandb_uncer_map
+            '''
             
             # Add the images to tensorboard ...
             '''
@@ -387,13 +390,14 @@ if __name__ == "__main__":
             '''
             # Save the images locally ...
             datalogger.write_image(sample_depth_map,str(t),"depth_map_s" + str(m) + ".png","magma", True)
+            '''
             if par.use_stereo:
                 datalogger.write_image(sample_stereo_depth_map,str(t),"stereo_depth_map_s" + str(m) + ".png","magma", True)
                 del sample_stereo_depth_map
             if par.use_uncer:
                 datalogger.write_image(sample_uncer_map,str(t),"uncertainty_map_s" + str(m) + ".png","viridis", True)
                 del sample_uncer_map
-            
+            '''
             del sample_depth_map
             
         progress_files.close()
@@ -403,6 +407,8 @@ if __name__ == "__main__":
     
         checkpoint_epoch = t # The last finished epoch.
         checkpoint_loss = val_loss # Last known validation loss
+        
+        #torch.cuda.empty_cache()
         
     
     t1 = time.time()

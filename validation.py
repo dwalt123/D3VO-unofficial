@@ -29,6 +29,7 @@ def test_loop(img_dir, test_file, test_data_pose, test_data_depth,
             idx = j # Only works for one test folder
             
             # Getting Data
+            '''
             if par.use_stereo:
                 random_pick = torch.randint(0,2,(1,)).item()
                 if random_pick == 0:
@@ -37,6 +38,8 @@ def test_loop(img_dir, test_file, test_data_pose, test_data_depth,
                     cam_view = "right"
             else:
                 cam_view = "left"
+            '''
+            cam_view = "left"
             
             p_images = test_data_pose.__getitem__(idx,shuffled_list,cam_view) 
             d_images = test_data_depth.__getitem__(idx,shuffled_list,cam_view)
@@ -56,15 +59,17 @@ def test_loop(img_dir, test_file, test_data_pose, test_data_depth,
             # Formerly in loss function
             #pose_6dof_t_minus_1_t,a1,b1 = posenet_model(p_images[:,:6,:,:]) # 6DOF pose, affine params for T_t-1 to T_t
             pose_input = torch.cat((p_images["t-1"], p_images["t"]),1)
-            translation1, rotation1, a1, b1 = posenet_model(pose_input)
+            #translation1, rotation1, a1, b1 = posenet_model(pose_input)
+            translation1, rotation1 = posenet_model(pose_input)
             pose_6dof_t_minus_1_t = torch.cat((translation1,rotation1),1)
         
             reverse_tensor = torch.cat((p_images["t+1"], p_images["t"]),1)
-            translation2, rotation2, a2, b2 = posenet_model(reverse_tensor)
+            #translation2, rotation2, a2, b2 = posenet_model(reverse_tensor)
+            translation2, rotation2 = posenet_model(reverse_tensor)
             pose_6dof_t_t_plus_1 = torch.cat((translation2,rotation2),1)
-        
-            util.print_regression_progress(img_dir,pose_6dof_t_minus_1_t, a1, b1, sample_idx, dataset_type)
             
+            
+            '''
             if par.use_stereo:
                 if d_images["cam"] == "left":
                     depth_input = d_images["t"]
@@ -72,6 +77,8 @@ def test_loop(img_dir, test_file, test_data_pose, test_data_depth,
                     depth_input = d_images["ts"]
             else:
                 depth_input = d_images["t"]
+            '''
+            depth_input = d_images["t"]
             
             depth_block_out = depthnet_model(depth_input)
             depth_block_s1 = depth_block_out[('disp', 0)]
@@ -85,6 +92,16 @@ def test_loop(img_dir, test_file, test_data_pose, test_data_depth,
                       '2':depth_block_s2,
                       '3':depth_block_s1}
             
+            a1 = 1.0
+            b1 = 0.0
+            inv_depth = 1.0/depth_block_s1
+            mean_inv_depth = inv_depth.mean(3,False).mean(2,False).reshape(par.batch_size)
+            #print(mean_inv_depth.shape)
+            util.print_regression_progress(img_dir,pose_6dof_t_minus_1_t, 
+                                           mean_inv_depth, a1, b1, 
+                                           sample_idx, dataset_type)
+            
+            '''
             if par.use_stereo:
                 if d_images["cam"] == "left":
                     # Right Cam to Left Cam
@@ -98,15 +115,20 @@ def test_loop(img_dir, test_file, test_data_pose, test_data_depth,
                     stereo_baseline = torch.cat((torch.t(Rs),torch.matmul(-1*torch.t(Rs),trans)),1)
             else:
                 stereo_baseline = util.get_stereo_baseline_transformation(sample_idx, dataset_type)[:3,:]
+            '''
             
-            #stereo_baseline = util.get_stereo_baseline_transformation(sample_idx, dataset_type)[:3,:]
+            stereo_baseline = util.get_stereo_baseline_transformation(sample_idx, dataset_type)[:3,:].to(par.device)
             # Affine Transformations for T_t-1->T_t and T_t+1->T_t
+            '''
             if par.use_ab:
                 a = [a1, a2]
                 b = [b1, b2]
             else:
                 a = []
                 b = []
+            '''
+            a = []
+            b = []
             
             curr_loss = loss_fn(p_images,
                                 d_images,
