@@ -4,31 +4,34 @@
 # os, sys, math, time, random, copy, __future__, collections
 
 #argparse
-pip3 install argparse
+sudo pip3 install argparse
 
 #yaml
-pip3 install pyyaml
+sudo pip3 install pyyaml
 
 #numpy
-pip3 install numpy
+sudo pip3 install numpy
 
 #cv2
-pip3 install opencv-python
+sudo apt-get install python3-opencv
 
 #matplotlib
-pip3 install matplotlib
+sudo pip3 install matplotlib
 
-# torch and torchvision
-pip3 install torch torchvision torchaudio
+# torch, torchvision, theseus-ai, torch-lie
+sudo pip3 install torch torchvision
+sudo apt-get install libsuitesparse-dev
+sudo pip3 install theseus-ai
+sudo pip3 install torchlie
 
 #PIL
-pip3 install pillow
+sudo pip3 install pillow
 
 #wandb
-pip3 install wandb
+sudo pip3 install wandb
 
 #kornia
-pip3 install kornia
+sudo pip3 install kornia
 
 #skimage
-pip3 install scikit-image
+sudo pip3 install scikit-image
