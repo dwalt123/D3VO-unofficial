@@ -23,6 +23,7 @@ sudo pip3 install torch torchvision
 sudo apt-get install libsuitesparse-dev
 sudo pip3 install theseus-ai
 sudo pip3 install torchlie
+sudo pip3 install tensorboard
 
 #PIL
 sudo pip3 install pillow

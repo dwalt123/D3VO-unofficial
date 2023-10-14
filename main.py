@@ -47,7 +47,7 @@ if __name__ == "__main__":
     # For Checkpoint Saving
     SAVE_CHECKPOINT = 60*60*2 # time (in seconds) to save checkpoint (e.g., 10 hours = 36000 seconds)
     model_number = 0
-    date = '8_20_2023' # Last Model: 6_10_23
+    date = '9_24_2023' # Last Model: 6_10_23
     model_root_name = os.path.join('models','d3vo_model_')
     pose_model_checkpoint_path = model_root_name + date + '_v' + str(model_number) + '_pose.pth'
     depth_model_checkpoint_path = model_root_name + date + '_v' + str(model_number) + '_depth.pth'
@@ -336,7 +336,7 @@ if __name__ == "__main__":
         #db3 = depth_block_out[('disp', 2)]
         #db4 = depth_block_out[('disp', 3)]
         
-        datalogger.write_image(test_img["t"][0,:,:,:],str(t),"rgb.png",None,False)
+        #datalogger.write_image(test_img["t"][0,:,:,:],str(t),"rgb.png",None,False)
         #shuffled_list = util.shuffle_sequence(progress_list)
         #sample_idx_ =  progress_list[0]
         #stereo_baseline_ = util.get_stereo_baseline_transformation(sample_idx_, dataset_type)[:3,:]
@@ -389,7 +389,7 @@ if __name__ == "__main__":
                                   torch.unsqueeze(sample_uncer_map,0),0)
             '''
             # Save the images locally ...
-            datalogger.write_image(sample_depth_map,str(t),"depth_map_s" + str(m) + ".png","magma", True)
+            #datalogger.write_image(sample_depth_map,str(t),"depth_map_s" + str(m) + ".png","magma", True)
             '''
             if par.use_stereo:
                 datalogger.write_image(sample_stereo_depth_map,str(t),"stereo_depth_map_s" + str(m) + ".png","magma", True)

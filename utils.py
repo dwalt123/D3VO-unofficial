@@ -738,6 +738,20 @@ class Utilities():
       
       return K
     
+    def update_intrinsics(self, K_list):
+        # Normalize
+        K_list[0][0,:] = K_list[0][0,:]/1241
+        K_list[0][1,:] = K_list[0][1,:]/376
+        K_list[1][0,:] = K_list[1][0,:]/1241
+        K_list[1][1,:] = K_list[1][1,:]/376
+        # Restructure
+        K_1 = torch.unsqueeze(K_list[0][:,:3],0)
+        K_2 = torch.unsqueeze(K_list[1][:,:3],0)
+        K_batch1 = K_1.repeat(par.batch_size,1,1).to(par.device)
+        K_batch2 = K_2.repeat(par.batch_size,1,1).to(par.device)
+        par.K1 = K_batch1
+        par.K2 = K_batch2
+
     def scale_intrinsics(self, K_mat, scale_int):
         K_mat[0,:] = K_mat[0,:]/(2**(int(scale_int)+1))
         K_mat[1,:] = K_mat[1,:]/(2**(int(scale_int)+1))

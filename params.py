@@ -57,14 +57,16 @@ class Params():
         # ------------------------- KITTI Data ----------------------------- #
         #self.kitti_img_dir = r'F:/OSUGrad/Research/Code/Datasets/KITTI/Raw/'
         #self.kitti_img_dir_test = r'F:/OSUGrad/Research/Code/Datasets/KITTI/Visual_Odometry/data_odometry_color/dataset/sequences/'
-        self.linux_root = '/media/dannyw/My Passport/'
-        self.windows_root = r'F:/'
+        #self.linux_root = '/media/dannyw/My Passport/'
+        #self.windows_root = r'F:/'
         self.os_name = 'linux'
         
-        self.os_root = self.linux_root if self.os_name == 'linux' else self.windows_root
-        self.kitti_img_dir = self.os_root+'OSUGrad/Research/Code/Datasets/KITTI/Raw/'
-        self.kitti_img_dir_test = self.os_root+'OSUGrad/Research/Code/Datasets/KITTI/Visual_Odometry/data_odometry_color/dataset/sequences/'
-        
+        #self.os_root = self.linux_root if self.os_name == 'linux' else self.windows_root
+        self.os_root = self.os_name
+        #self.kitti_img_dir = self.os_root+'OSUGrad/Research/Code/Datasets/KITTI/Raw/'
+        self.kitti_img_dir = '/mnt/disks/datasets/'
+        #self.kitti_img_dir_test = self.os_root+'OSUGrad/Research/Code/Datasets/KITTI/Visual_Odometry/data_odometry_color/dataset/sequences/'
+        '''
         self.kitti_img_dir_test_seqs = {'00': self.kitti_img_dir_test + '00/',
                                         '01': self.kitti_img_dir_test + '01/',
                                         '02': self.kitti_img_dir_test + '02/',
@@ -87,7 +89,7 @@ class Params():
                                         '19': self.kitti_img_dir_test + '19/',
                                         '20': self.kitti_img_dir_test + '20/',
                                         '21': self.kitti_img_dir_test + '21/'}
-        
+        '''
         self.kitti_cam_cal = 'calib_cam_to_cam.txt'
         self.kitti_left_cam = 'image_02'
         self.kitti_right_cam = 'image_03'
@@ -98,16 +100,21 @@ class Params():
         
         # D3VO datasplit:
         # The 'Eigen' split is 61 sequences in the raw dataset for KITTI
-        #self.kitti_train_split = r'split/KITTI/train_files.txt'
-        #self.kitti_val_split = r'split/KITTI/val_files.txt'
-        #self.kitti_test_split = r'split/KITTI/val_files.txt' # TODO: Generate your own test files .txt after training
+        self.kitti_train_split = r'split/KITTI/train_files.txt'
+        self.kitti_val_split = r'split/KITTI/val_files.txt'
+        self.kitti_test_split = r'split/KITTI/val_files.txt' # TODO: Generate your own test files .txt after training
         # Subsets to test code
-        self.kitti_train_split = 'split/KITTI/train_subset.txt'
-        self.kitti_val_split = 'split/KITTI/val_subset.txt'
-        self.kitti_test_split = 'split/KITTI/val_subset.txt' # TODO: Generate your own test files .txt after training
+        #self.kitti_train_split = 'split/KITTI/train_subset.txt'
+        #self.kitti_val_split = 'split/KITTI/val_subset.txt'
+        #self.kitti_test_split = 'split/KITTI/val_subset.txt' # TODO: Generate your own test files .txt after training
         
         # ----------------------- EuRoC MAV Data --------------------------- #
-        self.euroc_mav_img_dir = self.os_root+'OSUGrad/Research/Code/Datasets/EuRoC_MAV/'
+        self.euroc_mav_img_dir = ""
+        #self.euroc_mav_sequences = []
+        #self.euroc_left_cam = ''
+        #self.euroc_right_cam = ''
+        
+        #self.euroc_mav_img_dir = self.os_root+'OSUGrad/Research/Code/Datasets/EuRoC_MAV/'
         self.euroc_mav_sequences = ['machine_hall/MH_01_easy/mav0/',
                                     'machine_hall/MH_02_easy/mav0/',
                                     'machine_hall/MH_03_medium/mav0/',
@@ -147,8 +154,15 @@ class Params():
         self.transform_euroc = torchvision.transforms.Compose([self.torch_resize, 
                                                                self.torch_totensor, 
                                                                self.torch_normalize_euroc])
-        self.batch_size = 4 # 8 recommended by D3VO
+        self.batch_size = 8 # 8 recommended by D3VO
         
+        # -------------------------- Initial Intrinsics -------------------- #
+        self.K1 = torch.tensor([[0.58, 0, 0.5],
+                               [0, 1.92, 0.5],
+                               [0, 0, 1]]).reshape(3,3)
+        self.K2 = torch.tensor([[0.58, 0, 0.5],
+                               [0, 1.92, 0.5],
+                               [0, 0, 1]]).reshape(3,3)
         # -------------------------- Loss Parameters ----------------------- #
         self.beta=1e-2
         self.alpha=0.85

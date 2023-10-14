@@ -28,7 +28,10 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
                posenet_model, depthnet_model, loss_fn, joint_optimizer,
                batch_size, writer, dataset_type):
     
-    
+    #curr_usage = float(torch.cuda.memory_allocated(par.device))
+    #max_usage = float(torch.cuda.max_memory_allocated(par.device))
+    #print("GPU Usage: " + str(curr_usage/max_usage) + "%")
+
     # Initializations
     avg_train_loss = 0 # tracking train loss
 
@@ -62,6 +65,10 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         print("c: " + str(c)) # Stack index
         print("Batch # (Entire Dataset): " + str(c) + ", " + "Batch Number: " + str(idx))
         
+        curr_usage = float(torch.cuda.memory_allocated(par.device))
+        max_usage = float(torch.cuda.max_memory_allocated(par.device))
+        print("GPU Usage: " + str(100*curr_usage/max_usage) + "%")
+
         # Get Data for Training Iteration
         '''
         if par.use_stereo:
@@ -81,11 +88,11 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         #p_images.float().to(par.device)
         #d_images.float().to(par.device)
         
-        p_images["t"].requires_grad = True
-        p_images["t+1"].requires_grad = True
-        p_images["t-1"].requires_grad = True
-        d_images["t"].requires_grad = True
-        d_images["ts"].requires_grad = True
+        #p_images["t"].requires_grad = True
+        #p_images["t+1"].requires_grad = True
+        #p_images["t-1"].requires_grad = True
+        #d_images["t"].requires_grad = True
+        #d_images["ts"].requires_grad = True
         
         #p_images.requires_grad = True
         #d_images.requires_grad = True
@@ -98,20 +105,42 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         
         # Intrinsic camera matrix
         intrinsic_mat = util.get_intrinsic_matrix(sample_idx, dataset_type) # 6/10/23 : Might need to normalize K (see monodepth github issues)
+        util.update_intrinsics(intrinsic_mat)
         
         # Training and Loss
         
+        depth_input = d_images["t"]
+
+        depth_block_out = depthnet_model(depth_input)
+        depth_block_s1 = depth_block_out[('disp', 0)]
+        #depth_block_s2 = depth_block_out[('disp', 1)]
+        #depth_block_s3 = depth_block_out[('disp', 2)]
+        #depth_block_s4 = depth_block_out[('disp', 3)]
+
+        # Dictionary of Scales
+        scales = {'0':depth_block_out[('disp', 3)],
+                  '1':depth_block_out[('disp', 2)],
+                  '2':depth_block_out[('disp', 1)],
+                  '3':depth_block_s1}
+        #print(depth_block_s1.shape)
+        # For Scaling
+        depth_map_ = 1.0 / (1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_block_s1)
+        inv_depth_ = 1.0/depth_map_
+        #inv_depth_ = depth_map_ 
+        mean_inv_depth = inv_depth_.mean(3,False).mean(2,False).reshape(par.batch_size,1)
+
         # Formerly in loss function
         pose_input = torch.cat((p_images["t-1"], p_images["t"]),1)
         #translation1, rotation1, a1, b1 = posenet_model(pose_input)
         translation1, rotation1 = posenet_model(pose_input)
-        pose_6dof_t_minus_1_t = torch.cat((translation1,rotation1),1).to(par.device)
+        pose_6dof_t_minus_1_t = torch.cat((translation1*mean_inv_depth,rotation1),1).to(par.device)
         
         reverse_tensor = torch.cat((p_images["t+1"], p_images["t"]),1)
         #translation2, rotation2, a2, b2 = posenet_model(reverse_tensor)
         translation2, rotation2 = posenet_model(reverse_tensor)
-        pose_6dof_t_t_plus_1 = torch.cat((translation2,rotation2),1).to(par.device)
+        pose_6dof_t_t_plus_1 = torch.cat((translation2*mean_inv_depth,rotation2),1).to(par.device)
         
+        #continue
         #depth_input = d_images[:,:3,:,:]
         # Always want to feed the left image in the stereo pair for either monocular or stereo case
         '''
@@ -123,20 +152,23 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         else:
             depth_input = d_images["t"]
         '''
+        
+        '''
         depth_input = d_images["t"]
         
         depth_block_out = depthnet_model(depth_input)
         depth_block_s1 = depth_block_out[('disp', 0)]
-        depth_block_s2 = depth_block_out[('disp', 1)]
-        depth_block_s3 = depth_block_out[('disp', 2)]
-        depth_block_s4 = depth_block_out[('disp', 3)]
+        #depth_block_s2 = depth_block_out[('disp', 1)]
+        #depth_block_s3 = depth_block_out[('disp', 2)]
+        #depth_block_s4 = depth_block_out[('disp', 3)]
         
         # Dictionary of Scales
-        scales = {'0':depth_block_s4.requires_grad_(True),
-                  '1':depth_block_s3.requires_grad_(True),
-                  '2':depth_block_s2.requires_grad_(True),
-                  '3':depth_block_s1.requires_grad_(True)}
-        
+        scales = {'0':depth_block_out[('disp', 3)],
+                  '1':depth_block_out[('disp', 2)],
+                  '2':depth_block_out[('disp', 1)],
+                  '3':depth_block_s1}
+        '''
+
         '''
         if par.use_stereo:
             if d_images["cam"] == "left":
@@ -164,7 +196,8 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         '''
         a = []
         b = []
-        
+        #continue
+        # The memory leak is in the loss function (use continue and monitor memory usage)
         loss = loss_fn(p_images,
                        d_images,
                        scales,
@@ -178,9 +211,9 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
                        idx,
                        dataset_type).float().to(par.device)
         
-        
+        #continue
         # Training Loss To Tensorboard
-        writer.add_scalar("Training Loss",loss,batch)
+        #writer.add_scalar("Training Loss",loss,batch)
         
         # Backpropagation
         joint_optimizer.zero_grad()
@@ -189,17 +222,18 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         if math.isnan(loss):
             sys.exit("Loss is NaN ...")
         
+        #if (batch%5) == 0:
         joint_optimizer.step()
         
         a1 = 1.0
         b1 = 0.0
-        inv_depth = 1.0/depth_block_s1
+        inv_depth = 1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_block_s1
         mean_inv_depth = inv_depth.mean(3,False).mean(2,False).reshape(par.batch_size)
         #print(mean_inv_depth.shape)
         util.print_regression_progress(img_dir,pose_6dof_t_minus_1_t, mean_inv_depth,
                                        a1, b1, sample_idx, dataset_type)
-        loss, current = loss.item(), batch 
-        avg_train_loss += loss # Summing train loss to average later
+        loss_, current = loss.detach().item(), batch 
+        avg_train_loss += loss_ # Summing train loss to average later
         
         wandb.log({"current_train_loss": loss})
         print(f"loss: {loss:>7f} [{current+1:>5d}/{int(N):>5d}]") # formerly n/batch_size instead of epoch_size
@@ -209,6 +243,16 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         idx += 1
         c += 1
         batch += 1
+
+        # Edited 9-24
+        #del p_images, d_images, depth_input, pose_input, reverse_tensor, scales
+        #print(torch.cuda.memory_summary(par.device))
+
+        #del loss, loss_, p_images, d_images, depth_input, pose_input, reverse_tensor, scales, inv_depth, mean_inv_depth, depth_block_s1, depth_block_out
+        
+        #print(torch.cuda.mem_get_info(par.device))
+        #torch.cuda.empty_cache()
+        print("Total Memory Allocated by Tensors: " + str(torch.cuda.max_memory_allocated()/1e9) + " (GB)")
 
     avg_train_loss = avg_train_loss / batch
     print(f"Avg. Train loss: {avg_train_loss:>8f} \n")
