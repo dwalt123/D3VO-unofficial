@@ -11,6 +11,8 @@ from utils import util
 from datatracker import datalogger, Hook
 import wandb
 
+from torchviz import make_dot
+
 '''
 
   TODO:
@@ -88,11 +90,16 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         #p_images.float().to(par.device)
         #d_images.float().to(par.device)
         
-        #p_images["t"].requires_grad = True
-        #p_images["t+1"].requires_grad = True
-        #p_images["t-1"].requires_grad = True
-        #d_images["t"].requires_grad = True
-        #d_images["ts"].requires_grad = True
+        p_images["t"].requires_grad = True
+        #print("I_t grad: " + str(p_images["t"].requires_grad))
+        p_images["t+1"].requires_grad = True
+        #print("I_t+1 grad: " + str(p_images["t+1"].requires_grad))
+        p_images["t-1"].requires_grad = True
+        #print("I_t-1 grad: " + str(p_images["t-1"].requires_grad))
+        d_images["t"].requires_grad = True
+        #print("D_t grad: " + str(d_images["t"].requires_grad))
+        d_images["ts"].requires_grad = True
+        #print("D_ts grad: " + str(d_images["ts"].requires_grad))
         
         #p_images.requires_grad = True
         #d_images.requires_grad = True
@@ -113,18 +120,18 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
 
         depth_block_out = depthnet_model(depth_input)
         depth_block_s1 = depth_block_out[('disp', 0)]
-        #depth_block_s2 = depth_block_out[('disp', 1)]
-        #depth_block_s3 = depth_block_out[('disp', 2)]
-        #depth_block_s4 = depth_block_out[('disp', 3)]
+        depth_block_s2 = depth_block_out[('disp', 1)]
+        depth_block_s3 = depth_block_out[('disp', 2)]
+        depth_block_s4 = depth_block_out[('disp', 3)]
 
         # Dictionary of Scales
-        scales = {'0':depth_block_out[('disp', 3)],
-                  '1':depth_block_out[('disp', 2)],
-                  '2':depth_block_out[('disp', 1)],
-                  '3':depth_block_s1}
+        scales = {'0':depth_block_s1,
+                  '1':depth_block_s2,
+                  '2':depth_block_s3,
+                  '3':depth_block_s4}
         #print(depth_block_s1.shape)
         # For Scaling
-        depth_map_ = 1.0 / (1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_block_s1)
+        depth_map_ = 1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_block_s1
         inv_depth_ = 1.0/depth_map_
         #inv_depth_ = depth_map_ 
         mean_inv_depth = inv_depth_.mean(3,False).mean(2,False).reshape(par.batch_size,1)
@@ -215,10 +222,16 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         # Training Loss To Tensorboard
         #writer.add_scalar("Training Loss",loss,batch)
         
+        #if idx == 0:
+        #    make_dot(loss,params=dict(loss_fn.named_parameters()))
+
         # Backpropagation
         joint_optimizer.zero_grad()
         loss.backward()
         
+        #if idx == 0:
+        #    make_dot(loss,params=dict(loss_fn.named_parameters()))
+
         if math.isnan(loss):
             sys.exit("Loss is NaN ...")
         
@@ -228,11 +241,12 @@ def train_loop(img_dir, train_file, training_data_pose, training_data_depth,
         a1 = 1.0
         b1 = 0.0
         inv_depth = 1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_block_s1
+        inv_depth = 1.0/inv_depth
         mean_inv_depth = inv_depth.mean(3,False).mean(2,False).reshape(par.batch_size)
         #print(mean_inv_depth.shape)
         util.print_regression_progress(img_dir,pose_6dof_t_minus_1_t, mean_inv_depth,
                                        a1, b1, sample_idx, dataset_type)
-        loss_, current = loss.detach().item(), batch 
+        loss_, current = loss.item(), batch 
         avg_train_loss += loss_ # Summing train loss to average later
         
         wandb.log({"current_train_loss": loss})

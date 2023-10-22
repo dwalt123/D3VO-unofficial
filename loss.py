@@ -219,6 +219,8 @@ class ResidualLoss(nn.Module):
         wssim = ssim(target_img, warped_img)
         wandb.log({"SSIM": torch.mean(wssim).detach().item()})
         
+        #loss_res = alpha*wssim + (1 - alpha)*weighted_l1
+        wandb.log({"Residual Loss": torch.mean(alpha*wssim + (1 - alpha)*weighted_l1)})
         return alpha*wssim + (1 - alpha)*weighted_l1
 
 residual_loss = ResidualLoss(11)
@@ -282,7 +284,7 @@ class LossSelf(nn.Module):
                 depth_map_ = baseline*f*depth_map
         '''
         
-        depth_map_ = (1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_map)
+        depth_map_ = 1.0/100.0 + (1.0/1e-2 - 1.0/100.0) * depth_map
         
         #inv_depth = 1.0/depth_map_
         
@@ -302,7 +304,7 @@ class LossSelf(nn.Module):
             elif pose_imgs["cam"] == "right":
                 depth_map_ = depth_map_[:,1,:,:]
         '''
-        depth_map_ = depth_map_[:,0,:,:]
+        #depth_map_ = depth_map_[:,0,:,:]
         
         
         # Should be fine to initialize here because Monodepth2 does it in a for loop
@@ -315,7 +317,7 @@ class LossSelf(nn.Module):
         #warped_img1 = torch.randn(par.batch_size,3,self.height,self.width).to(par.device)
         
         warped_img1 = warp_mono(pose_imgs["t-1"], 
-                                     torch.unsqueeze(depth_map_,1),
+                                     depth_map_,
                                      pose_6dof_t_minus_1_t._t,
                                      'mono') #pose_6dof_t_minus_1_t._t
             
@@ -339,7 +341,7 @@ class LossSelf(nn.Module):
         #warped_img2 = torch.randn(par.batch_size,3,self.height,self.width).to(par.device)
         
         warped_img2 = warp_mono(pose_imgs["t+1"], 
-                                     torch.unsqueeze(depth_map_,1), 
+                                     depth_map_, 
                                      pose_6dof_t_t_plus_1._t,
                                      'mono') #pose_6dof_t_t_plus_1._t
         
@@ -363,19 +365,22 @@ class LossSelf(nn.Module):
         '''
         #print(stereo_baseline)
         #warped_img3 = torch.randn(par.batch_size,3,self.height,self.width).to(par.device)
-        
+        #print("Stereo Transformation:")
+        #print(stereo_baseline)
         warped_img3 = warp_stereo(depth_imgs["ts"], 
-                                       torch.unsqueeze(depth_map_,1),
+                                       depth_map_,
                                        stereo_baseline.reshape(1,3,4),
                                        'stereo')
         
         res_t_stereo = residual_loss(pose_imgs["t"],warped_img3,par.alpha)
         res_t_stereo = res_t_stereo.mean(1,True)
         res_min, idxes = torch.min(torch.cat((res_t_minus_1,res_t_plus_1,res_t_stereo),1),1)
+        #res_min = res_t_stereo
+        #res_min = (res_t_minus_1+res_t_plus_1+res_t_stereo)/3
         wandb.log({"mean res_min": torch.mean(res_min[0,:,:]).detach().item()})
         
         
-        batch_chkpt = [0,1000,2500,4000]
+        batch_chkpt = [0,100,250,500,1000,2500,4000]
         
         if scale == 1 and batch_num in batch_chkpt:
             #folder = os.path.join("batch",str(batch_num))
@@ -387,6 +392,12 @@ class LossSelf(nn.Module):
             
             tgt_img_wandb = wandb.Image(pose_imgs["t"][0,:,:,:], caption="Target Image")
             wandb.log({"target_img": tgt_img_wandb})
+
+            warped_img_wandb = wandb.Image(warped_img1[0,:,:,:], caption="Warped Mono Image")
+            wandb.log({"warped_img": warped_img_wandb})
+
+            warped_stereo_img_wandb = wandb.Image(warped_img3[0,:,:,:], caption="Warped Stereo Image")
+            wandb.log({"warped_stereo_img": warped_stereo_img_wandb})
 
             #src_img_wandb = wandb.Image(pose_imgs["t-1"][0,:,:,:], caption="Source Image")
             #wandb.log({"src_img": src_img_wandb})
@@ -523,15 +534,21 @@ class LossSmooth(nn.Module):
           depth_mean = torch.mean(depth_map)
           depth_map = depth_map/depth_mean # mean-normalized inverse depth as proposed by Monodepth2
       '''
-      depth_mean = torch.mean(depth_map)
-      depth_map = depth_map/depth_mean
+      #depth_mean = torch.mean(depth_map)
+      #depth_map = depth_map/depth_mean
       
-      depth_grad_x = torch.mean(torch.abs(depth_map[:, :, :, :-1] - depth_map[:, :, :, 1:]),1,keepdim=True)
-      depth_grad_y = torch.mean(torch.abs(depth_map[:, :, :-1, :] - depth_map[: , :, 1:, :]),1,keepdim=True)
+      #depth_grad_x = torch.mean(torch.abs(depth_map[:, :, :, :-1] - depth_map[:, :, :, 1:]),1,keepdim=True)
+      #depth_grad_y = torch.mean(torch.abs(depth_map[:, :, :-1, :] - depth_map[: , :, 1:, :]),1,keepdim=True)
       
+      depth_grad_x = torch.abs(depth_map[:, :, :, :-1] - depth_map[:, :, :, 1:])
+      depth_grad_y = torch.abs(depth_map[:, :, :-1, :] - depth_map[: , :, 1:, :])
+
       image_grad_x = torch.mean(torch.abs(source_img[:, :, :, :-1] - source_img[:, :, :, 1:]),1, keepdim=True)
       image_grad_y = torch.mean(torch.abs(source_img[:, :, :-1, :] - source_img[:, :, 1:, :]),1, keepdim=True)
       
+      #image_grad_x = torch.abs(source_img[:, :, :, :-1] - source_img[:, :, :, 1:])
+      #image_grad_y = torch.abs(source_img[:, :, :-1, :] - source_img[:, :, 1:, :])
+
       depth_grad_x *= torch.exp(-image_grad_x)
       depth_grad_y *= torch.exp(-image_grad_y)
       
@@ -543,6 +560,8 @@ class LossSmooth(nn.Module):
           loss_sm = depth_grad_x.sum() + depth_grad_y.sum()
       '''
       loss_sm = depth_grad_x.sum() + depth_grad_y.sum()
+      #loss_sm = depth_grad_x.mean() + depth_grad_y.mean()
+      wandb.log({"Smoothness Loss": loss_sm})
       return loss_sm
 
 Loss_smooth = LossSmooth()
@@ -566,6 +585,7 @@ class SingleScaleLoss(nn.Module):
       elif depth_imgs["cam"] == "right":
           l_smooth = self.Loss_smooth(depth_imgs["t"],torch.unsqueeze(depth_map[:,1,:,:],1))
       '''  
+      
       l_smooth = Loss_smooth(depth_imgs["t"],torch.unsqueeze(depth_map[:,0,:,:],1))
       
       '''
@@ -597,6 +617,7 @@ class SingleScaleLoss(nn.Module):
       #print(f"loss_residual = {loss_res**s:.3f}")
       
       loss_tot = loss_res + lamb*loss_reg
+      wandb.log({"Loss Regularization": lamb*loss_reg})
       #loss_tot = loss_res
       
       '''

@@ -216,11 +216,18 @@ class Utilities():
         T02 = torch.tensor([float(i) for i in T_02]).view(3,1)
         
         base = torch.tensor([0,0,0,1]).view(1,4)
-        
+        '''
         T_mat_02 = torch.cat((R02,T02),1)
         T_mat_30 = torch.cat((torch.t(R03),
                               torch.matmul(-1*torch.t(R03),T03)),1) # T_30 = (T_03)^-1
         
+        T_final = torch.matmul(torch.cat((T_mat_02,base),0),
+                               torch.cat((T_mat_30,base),0))
+        '''
+        T_mat_30 = torch.cat((R03,T03),1)
+        T_mat_02 = torch.cat((torch.t(R02),
+                              torch.matmul(-1*torch.t(R02),T02)),1) # T_20 = (T_02)^-1
+
         T_final = torch.matmul(torch.cat((T_mat_02,base),0),
                                torch.cat((T_mat_30,base),0))
         #print(T03.shape)
@@ -657,6 +664,7 @@ class Utilities():
               print(f"Affine Transformations: a = {a[0].item():.3f}, b = {b[0].item():.3f}")
           
           if dataset == 'kitti':
+              print(f"Est. Scale (Mean Inv. Depth): {scale[0].item():.3f}")
               print(f"Est. Pose (m, rad): x = {x[0]:.3f}, y = {y[0]:.3f}, z = {z[0]:.3f}, roll = {roll[0]:.3f}, pitch = {pitch[0]:.3f}, yaw = {yaw[0]:.3f}")
               print(f"Ground Truth (m, rad): x = {x1.item():.3f}, y = {y1.item():.3f}, z = {z1.item():.3f}, roll = {pitch1:.3f}, pitch = {yaw1:.3f}, yaw = {roll1:.3f}")
           elif dataset == 'euroc':
