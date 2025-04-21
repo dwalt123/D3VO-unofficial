@@ -3,6 +3,8 @@ core/
 issues/
 log/
 models/
-__pycache_/
+__pycache_
 runs/
 wandb/
+*.swp
+*.txt
